@@ -1,0 +1,6 @@
+{
+  "name": "Jubilee Workspace",
+  "description": "An event-sourced memory substrate that tracks how artifacts evolve, capture ideas, transform, and cross-pollinate.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
