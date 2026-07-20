@@ -101,6 +101,9 @@ class MockQueryBuilder {
 
     // Apply Update if active
     if (this.updateData) {
+      if (this.tableName === 'events') {
+        throw new Error("ERROR: permission denied for relation events");
+      }
       const allData = this.getTableData();
       const updatedList: any[] = [];
       const updatedAll = allData.map(item => {

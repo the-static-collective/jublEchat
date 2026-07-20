@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import type { VM, Artifact, Claim, Transformation, Edge, Receipt, GraphNode, GraphEdge, ArtifactType, JubileeEvent, Proposal, Idea, IdeaVersion, WitnessStrength } from './types';
+import { computeEventHash } from './ledger';
 
 export function useVMs() {
   const [vms, setVMs] = useState<VM[]>([]);
@@ -163,18 +164,99 @@ export async function logEvent(event: {
   source_proposal_id?: string;
   witness_strength?: WitnessStrength;
 }): Promise<void> {
-  await supabase.from('events').insert({
-    event_type: event.event_type,
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
+
+  // Fetch authenticated session securely
+  const { data: { session } } = await supabase.auth.getSession();
+  const sessionUser = session?.user;
+
+  // Real production secure server logging boundary
+  if (isConfigured) {
+    const token = session?.access_token;
+    const response = await fetch('/api/events/log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify(event),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to log event on server: ${errText}`);
+    }
+    return;
+  }
+
+  // Local fallback / sandbox mode
+  // Actor payload verification boundary
+  const secureActor = {
+    source: 'authenticated_session',
+    id: sessionUser?.id || 'anonymous_operator',
+    email: sessionUser?.email || 'anonymous-email'
+  };
+
+  const finalPayload = {
+    ...(event.payload || {}),
+    actor: secureActor,
+    _signature_hash: '' // to be populated
+  };
+
+  // Get previous event hash to construct link
+  let lastHash = 'GENESIS_ANCHOR_v0.2';
+  const { data: latestEvents } = await supabase
+    .from('events')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (latestEvents && latestEvents.length > 0) {
+    const latestEvent = latestEvents[0];
+    const p = typeof latestEvent.payload === 'string' 
+      ? JSON.parse(latestEvent.payload) 
+      : latestEvent.payload;
+    if (p && p._signature_hash) {
+      lastHash = p._signature_hash;
+    }
+  }
+
+  const generatedId = crypto.randomUUID();
+  const tempEvent: JubileeEvent = {
+    id: generatedId,
+    event_type: event.event_type as any,
     entity_id: event.entity_id ?? null,
     entity_type: event.entity_type ?? null,
-    actor: event.actor ?? 'system',
-    actor_id: event.actor_id ?? null,
-    capability: event.capability ?? null,
-    policy: event.policy ?? null,
-    payload: event.payload ?? null,
+    actor: event.actor ?? (sessionUser ? 'human' : 'system'),
+    actor_id: sessionUser?.email || event.actor_id || 'Human Operator',
+    capability: event.capability ?? 'manual-capture',
+    policy: event.policy ?? 'v0.2.1',
+    payload: finalPayload,
+    created_at: new Date().toISOString(),
     rationale: event.rationale ?? null,
     source_proposal_id: event.source_proposal_id ?? null,
     witness_strength: event.witness_strength ?? 5,
+  };
+
+  // Compute final hash
+  const finalHash = computeEventHash(tempEvent, lastHash);
+  finalPayload._signature_hash = finalHash;
+
+  await supabase.from('events').insert({
+    id: generatedId,
+    event_type: tempEvent.event_type,
+    entity_id: tempEvent.entity_id,
+    entity_type: tempEvent.entity_type,
+    actor: tempEvent.actor,
+    actor_id: tempEvent.actor_id,
+    capability: tempEvent.capability,
+    policy: tempEvent.policy,
+    payload: finalPayload,
+    created_at: tempEvent.created_at,
+    rationale: tempEvent.rationale,
+    source_proposal_id: tempEvent.source_proposal_id,
+    witness_strength: tempEvent.witness_strength,
   });
 }
 
@@ -528,6 +610,32 @@ export async function evolveIdea(data: {
   rationale: string;
   vm_id: string;
 }): Promise<Artifact | null> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
+
+  if (isConfigured) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    const response = await fetch('/api/harvest', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to process harvest on server: ${errText}`);
+    }
+
+    const result = await response.json();
+    return result.newArtifact;
+  }
+
+  // Local sandbox / fallback mode
   const { data: newArtifact } = await supabase
     .from('artifacts')
     .insert({

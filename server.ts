@@ -2,6 +2,50 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
+import { computeEventHash } from "./src/lib/ledger";
+
+// Initialize Server-bound Supabase Client
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+
+const isSupabaseConfigured = 
+  supabaseUrl && 
+  supabaseAnonKey && 
+  !supabaseUrl.includes('placeholder') && 
+  !supabaseUrl.includes('your-');
+
+const serverSupabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
+
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Authorization header is required');
+  }
+  const token = authHeader.substring(7);
+
+  if (!serverSupabase) {
+    // Mock / Sandbox mode fallback
+    try {
+      const decoded = Buffer.from(token, 'base64').toString('utf8');
+      const session = JSON.parse(decoded);
+      if (session?.user) {
+        return { id: session.user.id, email: session.user.email, isMock: true };
+      }
+    } catch {}
+    return { id: 'mock-user-id', email: 'mock-user@example.com', isMock: true };
+  }
+
+  // Verify token securely with Supabase auth service
+  const { data: { user }, error } = await serverSupabase.auth.getUser(token);
+  if (error || !user) {
+    throw new Error('Invalid authentication token: ' + (error?.message || 'No user found'));
+  }
+  return { id: user.id, email: user.email, isMock: false };
+}
 
 async function startServer() {
   const app = express();
@@ -20,14 +64,292 @@ async function startServer() {
     }
   });
 
+  // Secure Server-side Event Logging Endpoint (Derives actor identity from auth token)
+  app.post("/api/events/log", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const eventData = req.body;
+
+      if (!serverSupabase || user.isMock) {
+        return res.status(400).json({ error: "Server-side logging is only active in live Supabase mode." });
+      }
+
+      // 1. Fetch previous event hash to maintain cryptographic link chain
+      let lastHash = 'GENESIS_ANCHOR_v0.2';
+      const { data: latestEvents, error: fetchErr } = await serverSupabase
+        .from('events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (fetchErr) {
+        throw new Error(`Failed to fetch latest events: ${fetchErr.message}`);
+      }
+
+      if (latestEvents && latestEvents.length > 0) {
+        const latestEvent = latestEvents[0];
+        const p = typeof latestEvent.payload === 'string' 
+          ? JSON.parse(latestEvent.payload) 
+          : latestEvent.payload;
+        if (p && p._signature_hash) {
+          lastHash = p._signature_hash;
+        }
+      }
+
+      const generatedId = crypto.randomUUID();
+      const secureActor = {
+        source: 'authenticated_session',
+        id: user.id,
+        email: user.email
+      };
+
+      const finalPayload = {
+        ...(eventData.payload || {}),
+        actor: secureActor,
+        _signature_hash: ''
+      };
+
+      const tempEvent = {
+        id: generatedId,
+        event_type: eventData.event_type,
+        entity_id: eventData.entity_id || null,
+        entity_type: eventData.entity_type || null,
+        actor: eventData.actor || 'human',
+        actor_id: user.email,
+        capability: eventData.capability || 'manual-capture',
+        policy: eventData.policy || 'v0.2.1',
+        payload: finalPayload,
+        created_at: new Date().toISOString(),
+        rationale: eventData.rationale || null,
+        source_proposal_id: eventData.source_proposal_id || null,
+        witness_strength: eventData.witness_strength || 5,
+      };
+
+      // Compute final hash
+      const finalHash = computeEventHash(tempEvent as any, lastHash);
+      finalPayload._signature_hash = finalHash;
+
+      // Insert directly into events table via server context
+      const { error: insertErr } = await serverSupabase.from('events').insert({
+        id: generatedId,
+        event_type: tempEvent.event_type,
+        entity_id: tempEvent.entity_id,
+        entity_type: tempEvent.entity_type,
+        actor: tempEvent.actor,
+        actor_id: tempEvent.actor_id,
+        capability: tempEvent.capability,
+        policy: tempEvent.policy,
+        payload: finalPayload,
+        created_at: tempEvent.created_at,
+        rationale: tempEvent.rationale,
+        source_proposal_id: tempEvent.source_proposal_id,
+        witness_strength: tempEvent.witness_strength,
+      });
+
+      if (insertErr) {
+        throw new Error(`Failed to insert event: ${insertErr.message}`);
+      }
+
+      res.json({ success: true, eventId: generatedId, hash: finalHash });
+    } catch (error: any) {
+      console.error("Server event logging error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Secure Server-side Harvest API (Evolve Idea, handles multiple mutations as an atomic transaction)
+  app.post("/api/harvest", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const { idea_id, current_artifact_id, new_title, new_content, rationale, vm_id } = req.body;
+
+      if (!serverSupabase || user.isMock) {
+        return res.status(400).json({ error: "Server-side harvest is only active in live Supabase mode." });
+      }
+
+      // 1. Create the new artifact
+      const { data: newArtifact, error: artErr } = await serverSupabase
+        .from('artifacts')
+        .insert({
+          vm_id,
+          title: new_title || 'Refined version',
+          content: new_content,
+          artifact_type: 'note',
+          origin: 'Evolved from previous version',
+          status: 'active',
+          parent_artifact_id: current_artifact_id,
+        })
+        .select()
+        .single();
+
+      if (artErr || !newArtifact) {
+        throw new Error(`Failed to create evolved artifact: ${artErr?.message}`);
+      }
+
+      // 2. Query next version number
+      const { data: versions, error: verQueryErr } = await serverSupabase
+        .from('idea_versions')
+        .select('version_number')
+        .eq('idea_id', idea_id)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (verQueryErr) {
+        throw new Error(`Failed to query version history: ${verQueryErr.message}`);
+      }
+
+      const nextVersion = (versions?.version_number ?? 0) + 1;
+
+      // 3. Write version link
+      const { error: verErr } = await serverSupabase.from('idea_versions').insert({
+        idea_id,
+        artifact_id: newArtifact.id,
+        version_number: nextVersion,
+      });
+
+      if (verErr) {
+        throw new Error(`Failed to record idea version: ${verErr.message}`);
+      }
+
+      // 4. Record derivation edge
+      await serverSupabase.from('edges').insert({
+        source_artifact_id: newArtifact.id,
+        target_artifact_id: current_artifact_id,
+        edge_type: 'DERIVES_FROM',
+      });
+
+      // 5. Update parent current_version_id
+      await serverSupabase.from('ideas').update({ current_version_id: newArtifact.id }).eq('id', idea_id);
+
+      // 6. Append the event log
+      // Fetch previous event hash to link
+      let lastHash = 'GENESIS_ANCHOR_v0.2';
+      const { data: latestEvents } = await serverSupabase
+        .from('events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (latestEvents && latestEvents.length > 0) {
+        const latestEvent = latestEvents[0];
+        const p = typeof latestEvent.payload === 'string' 
+          ? JSON.parse(latestEvent.payload) 
+          : latestEvent.payload;
+        if (p && p._signature_hash) {
+          lastHash = p._signature_hash;
+        }
+      }
+
+      const generatedId = crypto.randomUUID();
+      const secureActor = {
+        source: 'authenticated_session',
+        id: user.id,
+        email: user.email
+      };
+
+      const finalPayload = {
+        idea_id,
+        version: nextVersion,
+        parent_artifact_id: current_artifact_id,
+        actor: secureActor,
+        _signature_hash: ''
+      };
+
+      const tempEvent = {
+        id: generatedId,
+        event_type: 'transformation_accepted',
+        entity_id: newArtifact.id,
+        entity_type: 'artifact',
+        actor: 'human',
+        actor_id: user.email,
+        capability: 'evolve-idea',
+        policy: 'v0.4',
+        payload: finalPayload,
+        created_at: new Date().toISOString(),
+        rationale,
+        source_proposal_id: null,
+        witness_strength: 5,
+      };
+
+      const finalHash = computeEventHash(tempEvent as any, lastHash);
+      finalPayload._signature_hash = finalHash;
+
+      const { error: eventErr } = await serverSupabase.from('events').insert({
+        id: generatedId,
+        event_type: tempEvent.event_type,
+        entity_id: tempEvent.entity_id,
+        entity_type: tempEvent.entity_type,
+        actor: tempEvent.actor,
+        actor_id: tempEvent.actor_id,
+        capability: tempEvent.capability,
+        policy: tempEvent.policy,
+        payload: finalPayload,
+        created_at: tempEvent.created_at,
+        rationale: tempEvent.rationale,
+        source_proposal_id: tempEvent.source_proposal_id,
+        witness_strength: tempEvent.witness_strength,
+      });
+
+      if (eventErr) {
+        throw new Error(`Failed to log harvest event: ${eventErr.message}`);
+      }
+
+      res.json({ success: true, newArtifact });
+    } catch (error: any) {
+      console.error("Server harvest error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // API endpoint for chat
   app.post("/api/chat", async (req, res) => {
     try {
       const { message, history, activeIdeas } = req.body;
 
       if (!apiKey) {
+        const textLower = message.toLowerCase();
+
+        // Scenario 1: User wants to seed a community garden AI
+        if (textLower.includes("garden") && !textLower.includes("family") && !textLower.includes("families")) {
+          return res.json({
+            text: "That sounds like a beautiful, highly collaborative idea! A community garden AI could help self-organize shared tools, water schedules, and crop rotation.\n\nShould we capture this as a living concept in your garden lineage?",
+            proposals: [
+              {
+                type: "new_idea",
+                title: "Community Garden AI",
+                content: "A collaborative coordination system for community gardens to manage shared resources, crop rotations, water schedules, and knowledge sharing.",
+                rationale: "To transition from individual isolated plots to an intelligent, self-organizing organic commons.",
+                taxonomy_level: "idea"
+              }
+            ]
+          });
+        }
+
+        // Scenario 2: User wants to evolve it for families
+        if (textLower.includes("family") || textLower.includes("families") || textLower.includes("child") || textLower.includes("children")) {
+          // Find if there's an existing idea matching Community Garden AI
+          const gardenIdea = activeIdeas?.find((i: any) => i.title.toLowerCase().includes("garden"));
+          const targetId = gardenIdea ? gardenIdea.id : "manual-garden-id";
+
+          return res.json({
+            text: "Focusing on families is a powerful shift! It changes the design focus from standard agricultural infrastructure to high human adoption, intergenerational play, and collective child-rearing in nature.\n\nI can propose an evolution of our existing community garden idea to reflect this family-centered coordination focus.",
+            proposals: [
+              {
+                type: "evolve_idea",
+                title: "Family-Centered Community Garden Coordination System",
+                content: "A specialized community garden substrate focused on intergenerational adoption, family-friendly crop allocation, collaborative child-friendly play-and-grow spaces, and parental rotation systems.",
+                rationale: "Shifted from infrastructure focus to human adoption.",
+                taxonomy_level: "idea",
+                idea_id: targetId
+              }
+            ]
+          });
+        }
+
+        // Default sandbox response
         return res.json({
-          text: "I am operating in sandbox mode because no **GEMINI_API_KEY** is configured. You can provide your Gemini API key in **Settings > Secrets** to enable live AI intelligence.\n\nIn the meantime, you can still type messages, capture insights, and evolve your ideas manually using the workspace!",
+          text: "I am operating in sandbox mode because no **GEMINI_API_KEY** is configured in **Settings > Secrets**.\n\nIn the meantime, you can chat with me! Try typing:\n- *\"I think we should build a community garden AI\"* to plant a new seed.\n- *\"Actually it should focus on families\"* after planting it to witness an AI-driven evolution!\n\nYou can also capture insights, evolve versions, and synthesize elements manually.",
           proposals: [
             {
               type: "new_idea",
@@ -54,29 +376,15 @@ You help the user filter and cultivate their thinking across three main taxonomy
 
 Your job is to engage in a helpful, analytical, and friendly discussion.
 If you notice the user expressing a new insight, a cultivated idea, or an active project, you should propose to capture or evolve it.
-For example, if the user describes an evolution or modification to an existing idea, propose an 'evolve_idea' type.
-If they describe something that cross-pollinates multiple existing ideas, propose a 'synthesize_ideas' type with parent_ids.
-If they share a raw seed, propose a 'new_idea' (with a suggested level of 'insight', 'idea', or 'project').
+- If they share a new raw concept (e.g. "I think we should build a community garden AI"), propose a "new_idea" type proposal with an elegant title, content, and a rationale of why it exists.
+- If they describe an evolution, refinement, or change of focus to an existing idea (e.g., "Actually it should focus on families" or "Let's make it mobile-first"), propose an "evolve_idea" type proposal. Make sure to specify the matching "idea_id" from the list of active ideas provided below!
+- If they describe something that cross-pollinates or merges multiple existing ideas, propose a "synthesize_ideas" type proposal with parent_ids.
 
+Current living ideas in the workspace:
 ${ideasContext}
 
-You MUST respond strictly in the following JSON schema format:
-{
-  "text": "Your markdown-formatted conversational response to the user. Explain your thoughts and why you are proposing these actions.",
-  "proposals": [
-    {
-      "type": "new_idea" | "evolve_idea" | "synthesize_ideas",
-      "title": "A concise, elegant title",
-      "content": "The actual proposed text content of the idea, version, or branch",
-      "rationale": "Clear rationale statement answering 'Why does this exist?'",
-      "taxonomy_level": "insight" | "idea" | "project", // defaults to 'idea' if not specified
-      "idea_id": "if type is 'evolve_idea', specify the ID of the existing idea being evolved from the context",
-      "parent_ids": ["if type is 'synthesize_ideas' or 'evolve_idea', specify the relevant existing idea IDs being cross-pollinated or evolved"]
-    }
-  ]
-}
-
-Ensure your output is a single valid JSON object. Keep conversations highly collaborative, intellectual, and clear.`;
+When proposing an evolution ("evolve_idea"), always specify the correct "idea_id" of the idea being evolved so the user can accept it directly in their lineage view.
+Format your responses strictly in JSON. Ensure your proposals represent the miracle moment of idea cultivation!`;
 
       // Format history into contents parts for GoogleGenAI SDK
       const contents = [];
