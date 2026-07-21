@@ -167,6 +167,11 @@ export async function logEvent(event: {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
 
+  // Fail-closed production constraint: Prevent fallback to localStorage in production environments
+  if (import.meta.env.PROD && !isConfigured) {
+    throw new Error('SECURE_BACKEND_REQUIRED: Live Supabase backend is required in production environments to maintain cryptographic custody.');
+  }
+
   // Fetch authenticated session securely
   const { data: { session } } = await supabase.auth.getSession();
   const sessionUser = session?.user;
@@ -613,9 +618,41 @@ export async function evolveIdea(data: {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
 
+  // Fail-closed production constraint: Prevent fallback to localStorage in production environments
+  if (import.meta.env.PROD && !isConfigured) {
+    throw new Error('SECURE_BACKEND_REQUIRED: Live Supabase backend is required in production environments to perform transactions.');
+  }
+
   if (isConfigured) {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
+
+    // 1. Fetch expected head hash for Compare-and-Swap (CAS) validation
+    let expectedHash = 'GENESIS_ANCHOR_v0.2';
+    const { data: latestEvents } = await supabase
+      .from('events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (latestEvents && latestEvents.length > 0) {
+      const latestEvent = latestEvents[0];
+      const p = typeof latestEvent.payload === 'string' 
+        ? JSON.parse(latestEvent.payload) 
+        : latestEvent.payload;
+      if (p && p._signature_hash) {
+        expectedHash = p._signature_hash;
+      }
+    }
+
+    // 2. Generate transaction parameters (idempotency & CAS parameters)
+    const idempotencyKey = crypto.randomUUID();
+    const payload = {
+      ...data,
+      expected_last_event_hash: expectedHash,
+      actor: 'human',
+      idempotency_key: idempotencyKey,
+    };
 
     const response = await fetch('/api/harvest', {
       method: 'POST',
@@ -623,11 +660,17 @@ export async function evolveIdea(data: {
         'Content-Type': 'application/json',
         'Authorization': token ? `Bearer ${token}` : '',
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       const errText = await response.text();
+      if (errText.includes('LEDGER_HEAD_CHANGED')) {
+        throw new Error('LEDGER_HEAD_CHANGED: The cultivation ledger head has progressed. Please refresh and retry your harvest.');
+      }
+      if (errText.includes('BASE_VERSION_NO_LONGER_CURRENT')) {
+        throw new Error('BASE_VERSION_NO_LONGER_CURRENT: This base version of the idea is no longer current. Another operator has already evolved this node.');
+      }
       throw new Error(`Failed to process harvest on server: ${errText}`);
     }
 

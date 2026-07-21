@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Sprout, Leaf, Send, HelpCircle, GitMerge, Clock, Check, X,
   RefreshCw, Plus, MessageSquare, Sparkles, AlertTriangle, Network, PlusCircle, ArrowLeft,
-  Shield, Database, Terminal, CheckCircle2, AlertCircle, History, ArrowDown
+  Shield, Database, Terminal, CheckCircle2, AlertCircle, History, ArrowDown, ShieldCheck, Flame
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './lib/auth';
 import {
@@ -11,7 +11,7 @@ import {
 } from './lib/hooks';
 import { GraphCanvas } from './components/GraphCanvas';
 import { type TaxonomyLevel } from './lib/types';
-import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents } from './lib/ledger';
+import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents, verifyStrictAncestryPath } from './lib/ledger';
 import { runIntegrationTests, type TestResult } from './lib/test-boundary';
 
 interface ChatMessage {
@@ -1746,8 +1746,9 @@ function AppContent() {
                           </div>
                         </div>
                       ) : (
-                        /* 2. "How It Grew" Narrative Provenance Engine */
+                        /* 2. "How It Grew" Narrative Provenance Engine with "Why Current?" and "Still Alive" Blueprint */
                         (() => {
+                          const strictAncestry = verifyStrictAncestryPath(idea, events, artifacts, messages);
                           const report = resolveWhyCurrentChain(idea.id, events, artifacts);
                           
                           if (report.status === 'ERROR') {
@@ -1758,9 +1759,304 @@ function AppContent() {
                             );
                           }
 
+                          if (!strictAncestry.isValid) {
+                            return (
+                              <div className="rounded-2xl border border-red-500/15 bg-red-950/20 p-5 space-y-4 animate-fadeIn">
+                                <div className="flex items-center gap-2 text-red-400">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  <h4 className="text-xs font-bold uppercase tracking-wider">Causal Lineage Verification Halted</h4>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-normal">
+                                  Unable to verify the complete path to this version. Technical record contains missing, compromised, or conflicting ancestry.
+                                </p>
+                                <div className="text-[10px] font-mono text-red-400 bg-red-950/40 p-3 rounded-xl border border-red-900/30 space-y-1">
+                                  <p className="font-bold uppercase text-[9px] text-red-500">Validation Failure Detail:</p>
+                                  <p className="italic">"{strictAncestry.reason || 'Ancestor mismatch or unauthorized mutation detected.'}"</p>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Derive Still Alive attributes
+                          const latestContent = latestArtifact?.content || '';
+                          const lines = latestContent.split(/[\r\n]+/);
+                          const unresolvedQuestions = lines
+                            .map(l => l.trim())
+                            .filter(l => l.endsWith('?'))
+                            .slice(0, 3);
+
+                          const pastVersionsOfThisIdea = allIdeaVersions
+                            .filter(v => v.idea_id === idea.id && v.artifact_id !== idea.current_version_id)
+                            .sort((a, b) => b.version_number - a.version_number);
+
+                          const parentArtifact = latestArtifact?.parent_artifact_id
+                            ? artifactMap.get(latestArtifact.parent_artifact_id)
+                            : null;
+
                           return (
-                            <div className="space-y-5 animate-fadeIn">
-                              <div className="flex items-center justify-between">
+                            <div className="space-y-6 animate-fadeIn">
+                              
+                              {/* --- WHY CURRENT & UNRESOLVED TENSIONS BENTO GRID --- */}
+                              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-6 border-b border-slate-900">
+                                
+                                {/* Left Side: "Why Current?" Causal Verification */}
+                                <div className="lg:col-span-7 bg-slate-950/40 border border-slate-900/60 rounded-2xl p-5 space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                                        Why is this version current?
+                                      </h4>
+                                    </div>
+                                    <span className="text-[8px] font-mono bg-emerald-950 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/10 uppercase tracking-wider font-bold">
+                                      Strict Ancestry Validated
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 leading-normal">
+                                    A thought is never arbitrarily finalized in Jubilee. The current state of this idea represents a fully verified causal chain:
+                                  </p>
+
+                                  {/* Visual Causal Flow diagram */}
+                                  <div className="space-y-4 pt-2">
+                                    {/* 1. Conversation Moment */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex flex-col items-center">
+                                        <div className="h-5 w-5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-[9px] font-mono text-slate-400 font-bold">
+                                          1
+                                        </div>
+                                        <div className="w-[1px] h-6 bg-slate-800" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-[11px] font-bold text-slate-200">Conversation Moment</p>
+                                          <span className="text-[8px] font-mono text-slate-500 bg-slate-900 px-1 rounded truncate max-w-[120px]" title={strictAncestry.sourceMessageId}>
+                                            msg: {strictAncestry.sourceMessageId}
+                                          </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                                          Planted seed on {report.steps[0] ? report.steps[0].date : 'origin'}. Captured as a primary metaphor.
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* 2. Candidate Proposal */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex flex-col items-center">
+                                        <div className="h-5 w-5 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-[9px] font-mono text-slate-400 font-bold">
+                                          2
+                                        </div>
+                                        <div className="w-[1px] h-6 bg-slate-800" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-[11px] font-bold text-slate-200">Candidate Proposal</p>
+                                          <span className="text-[8px] font-mono text-slate-500 bg-slate-900 px-1 truncate max-w-[120px]" title={strictAncestry.proposalEventId}>
+                                            evt: {strictAncestry.proposalEventId}
+                                          </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                                          AI co-cultivator or manual friction prompts a refinement path.
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* 3. Human Harvest & Rationale */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex flex-col items-center">
+                                        <div className="h-5 w-5 rounded-full bg-emerald-950/80 border border-emerald-500/30 flex items-center justify-center text-[9px] font-mono text-emerald-400 font-bold">
+                                          3
+                                        </div>
+                                        <div className="w-[1px] h-6 bg-slate-800" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                                            Human Harvest & Rationale
+                                          </p>
+                                          <span className="text-[8px] font-mono text-emerald-500/60 bg-emerald-950/50 px-1 rounded truncate max-w-[120px]" title={strictAncestry.harvestEventId}>
+                                            evt: {strictAncestry.harvestEventId}
+                                          </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                                          You authorized the mutation, appending conscious human rationale to the ledger.
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* 4. Current Form */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex flex-col items-center">
+                                        <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center text-[9px] font-mono text-slate-950 font-bold">
+                                          4
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-[11px] font-bold text-slate-200">
+                                            Current Form: The active, hash-linked witnessed version
+                                          </p>
+                                          <span className="text-[8px] font-mono text-slate-400 bg-slate-900 px-1 truncate max-w-[120px]" title={strictAncestry.createdVersionId}>
+                                            art: {strictAncestry.createdVersionId}
+                                          </span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 leading-relaxed italic line-clamp-2">
+                                          "{latestArtifact?.content || 'Empty state.'}"
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right Side: Still Alive & Nearby Growth split */}
+                                <div className="lg:col-span-5 space-y-5 flex flex-col justify-between">
+                                  
+                                  {/* Section 1: Still Alive (what did this transformation refuse to flatten?) */}
+                                  <div className="bg-slate-950/40 border border-slate-900/60 rounded-2xl p-5 space-y-3.5 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <Flame className="h-4 w-4 text-amber-500 animate-pulse" />
+                                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                                        Still Alive: Unresolved Tensions
+                                      </h4>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                                      A version being current does not seal the concept. These preserved frictions kept this idea dynamic:
+                                    </p>
+
+                                    <div className="space-y-3">
+                                      {/* Unresolved Questions */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                        <p className="text-[8px] font-mono text-amber-400 uppercase font-bold tracking-wider">
+                                          Unresolved Questions
+                                        </p>
+                                        {unresolvedQuestions.length > 0 ? (
+                                          <ul className="list-disc pl-3 text-[10px] text-slate-400 space-y-1">
+                                            {unresolvedQuestions.map((q, qIdx) => (
+                                              <li key={qIdx} className="italic leading-normal">"{q}"</li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <p className="text-[10px] text-slate-550 italic leading-relaxed">
+                                            No active questions flagged in the content. Ask an unanswered question to leave a structural tension.
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      {/* Preserved Tensions from rationale */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                        <p className="text-[8px] font-mono text-pink-400 uppercase font-bold tracking-wider">
+                                          Preserved Frictions
+                                        </p>
+                                        {latestArtifact?.origin ? (
+                                          <p className="text-[10px] text-slate-400 leading-normal italic">
+                                            "{latestArtifact.origin}"
+                                          </p>
+                                        ) : (
+                                          <p className="text-[10px] text-slate-550 italic leading-normal">
+                                            No explicit design frictions logged.
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      {/* Abandoned Paths */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                        <p className="text-[8px] font-mono text-violet-400 uppercase font-bold tracking-wider">
+                                          Abandoned Paths
+                                        </p>
+                                        {pastVersionsOfThisIdea.length > 0 ? (
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] text-slate-400 leading-normal">
+                                              {pastVersionsOfThisIdea.length} inactive version{pastVersionsOfThisIdea.length > 1 ? 's' : ''} preserved in the immutable history.
+                                            </p>
+                                            <div className="flex gap-1.5 flex-wrap pt-0.5">
+                                              {pastVersionsOfThisIdea.map((v) => (
+                                                <span key={v.id} className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1 py-0.5 rounded uppercase">
+                                                  v0.{v.version_number}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <p className="text-[10px] text-slate-550 italic leading-relaxed">
+                                            This is the genesis version. No earlier branches have been abandoned.
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Section 2: Nearby Growth (what else might this idea grow toward?) */}
+                                  <div className="bg-slate-950/40 border border-slate-900/60 rounded-2xl p-5 space-y-3.5">
+                                    <div className="flex items-center gap-2">
+                                      <Sprout className="h-4 w-4 text-cyan-400" />
+                                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                                        Nearby Growth: Ecological Context
+                                      </h4>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                                      Other adjacent concept vectors and active proposals growing in this garden:
+                                    </p>
+
+                                    <div className="space-y-2.5">
+                                      {/* Held Proposal Seeds */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                        <p className="text-[8px] font-mono text-cyan-400 uppercase font-bold tracking-wider">
+                                          Held Proposal Seeds
+                                        </p>
+                                        {activeProposalObj ? (
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] font-bold text-slate-300">"{activeProposalObj.title}"</p>
+                                            <p className="text-[9px] text-slate-500 italic line-clamp-1 leading-normal">
+                                              "{activeProposalObj.rationale}"
+                                            </p>
+                                          </div>
+                                        ) : (
+                                          <p className="text-[9px] text-slate-550 italic">
+                                            No active invitations waiting from Co-Cultivator AI.
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      {/* Sibling Ideas */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                        <p className="text-[8px] font-mono text-emerald-400 uppercase font-bold tracking-wider">
+                                          Divergent Sibling Nodes
+                                        </p>
+                                        {(() => {
+                                          const siblingIdeas = ideas.filter(i => i.id !== idea.id && i.taxonomy_level === idea.taxonomy_level && i.status === 'active');
+                                          if (siblingIdeas.length > 0) {
+                                            return (
+                                              <div className="flex flex-col gap-1">
+                                                {siblingIdeas.slice(0, 2).map(sib => (
+                                                  <div key={sib.id} className="flex items-center justify-between gap-2 text-[10px]">
+                                                    <span className="font-medium text-slate-300 truncate max-w-[130px]">{sib.title}</span>
+                                                    <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1 rounded uppercase">
+                                                      {sib.taxonomy_level}
+                                                    </span>
+                                                  </div>
+                                                ))}
+                                                {siblingIdeas.length > 2 && (
+                                                  <p className="text-[8px] text-slate-500 font-mono italic pt-0.5">
+                                                    + {siblingIdeas.length - 2} more active parallel nodes
+                                                  </p>
+                                                )}
+                                              </div>
+                                            );
+                                          }
+                                          return (
+                                            <p className="text-[9px] text-slate-555 italic">
+                                              No parallel active {idea.taxonomy_level} nodes in this ecology.
+                                            </p>
+                                          );
+                                        })()}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                </div>
+                              </div>
+
+                              {/* --- ORIGINAL NARRATIVE LINEAGE HISTORY --- */}
+                              <div className="flex items-center justify-between pt-2">
                                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                                   Lineage Narrative History
                                 </h4>
@@ -1857,7 +2153,7 @@ function AppContent() {
                                       </div>
                                     </div>
                                     <p className="text-[9px] text-slate-550 italic border-t border-slate-900/60 pt-1.5 mt-2">
-                                      * Cryptographic witness strength is determined by decentralized human key signatures, validating that no machine-level agent bypassed the harvest verification bounds.
+                                      * Cryptographic witness strength is verified by hash-chain integrity markers, ensuring that any payload or parent-link alteration causes hash-chain verification to fail during replay.
                                     </p>
                                   </div>
                                 )}

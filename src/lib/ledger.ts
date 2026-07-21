@@ -448,6 +448,142 @@ export function resolveWhyCurrentChain(
   };
 }
 
+export interface StrictAncestryResult {
+  isValid: boolean;
+  reason?: string;
+  sourceMessageId?: string;
+  proposalEventId?: string;
+  harvestEventId?: string;
+  createdVersionId?: string;
+  currentVersionId?: string;
+}
+
+export function verifyStrictAncestryPath(
+  idea: { id: string; current_version_id: string; title: string },
+  events: JubileeEvent[],
+  artifacts: any[],
+  messages: any[]
+): StrictAncestryResult {
+  const currentVersionId = idea.current_version_id;
+  if (!currentVersionId) {
+    return { isValid: false, reason: 'Current version ID is empty.' };
+  }
+
+  // 1. Current pointer references an unverified version
+  const currentArtifact = artifacts.find(a => a.id === currentVersionId);
+  if (!currentArtifact) {
+    return { isValid: false, reason: 'Current pointer references an unverified version (artifact not found).' };
+  }
+
+  // Check if there is an event claiming this version
+  const claimEvents = events.filter(e => 
+    (e.event_type === 'transformation_accepted' && e.entity_id === currentVersionId) ||
+    (e.event_type === 'artifact_created' && e.entity_type === 'idea' && (e.payload as any)?.artifact_id === currentVersionId)
+  );
+
+  if (claimEvents.length === 0) {
+    return { isValid: false, reason: 'Current pointer references an unverified version (no creation or harvest event found).' };
+  }
+
+  // 2. Multiple harvest events claim the same version
+  const harvestEventsForThisVersion = events.filter(e => 
+    e.event_type === 'transformation_accepted' && e.entity_id === currentVersionId
+  );
+  if (harvestEventsForThisVersion.length > 1) {
+    return { isValid: false, reason: 'Multiple harvest events claim the same version.' };
+  }
+
+  const harvestEvent = harvestEventsForThisVersion[0];
+
+  // If this is the initial version (first version), it won't have a proposal, but it has an artifact_created event.
+  if (!harvestEvent) {
+    const genesisEvent = events.find(e => 
+      e.event_type === 'artifact_created' && 
+      e.entity_type === 'idea' && 
+      e.entity_id === idea.id &&
+      (e.payload as any)?.artifact_id === currentVersionId
+    );
+    if (genesisEvent) {
+      return {
+        isValid: true,
+        createdVersionId: currentVersionId,
+        currentVersionId: currentVersionId,
+        harvestEventId: genesisEvent.id
+      };
+    }
+    return { isValid: false, reason: 'Current version is not linked via an authorized harvest or seed event.' };
+  }
+
+  // 3. The proposal check (if there is an associated proposal)
+  const parentArtifactId = currentArtifact.parent_artifact_id;
+  
+  // Find a transformation proposal that targeted the parent artifact
+  const proposalsForParent = events.filter(e => 
+    e.event_type === 'transformation_proposed' && 
+    (e.payload as any)?.artifact_id === parentArtifactId
+  );
+
+  let proposalEvent: JubileeEvent | undefined = undefined;
+  let sourceMsgId: string | undefined = undefined;
+
+  if (proposalsForParent.length > 0) {
+    proposalEvent = proposalsForParent.find(p => {
+      // 4. The harvest occurs before its proposal
+      const harvestTime = new Date(harvestEvent.created_at).getTime();
+      const proposalTime = new Date(p.created_at).getTime();
+      return harvestTime >= proposalTime;
+    });
+
+    if (proposalsForParent.some(p => {
+      const harvestTime = new Date(harvestEvent.created_at).getTime();
+      const proposalTime = new Date(p.created_at).getTime();
+      return harvestTime < proposalTime;
+    })) {
+      return { isValid: false, reason: 'The harvest occurs before its proposal.' };
+    }
+  }
+
+  if (proposalEvent) {
+    // 5. The proposal targets another idea
+    const targetArtifactId = (proposalEvent.payload as any)?.artifact_id;
+    if (targetArtifactId) {
+      const isTargetForThisIdea = (proposalEvent.payload as any)?.idea_id === idea.id || 
+        artifacts.some(a => a.id === targetArtifactId && (a.idea_id === idea.id || events.some(evt => evt.entity_id === idea.id && (evt.payload as any)?.artifact_id === targetArtifactId)));
+      if (!isTargetForThisIdea) {
+        return { isValid: false, reason: 'The proposal targets another idea.' };
+      }
+    }
+
+    // 6. The proposal base differs from the version parent
+    const proposalBaseId = (proposalEvent.payload as any)?.artifact_id;
+    if (proposalBaseId && parentArtifactId && proposalBaseId !== parentArtifactId) {
+      return { isValid: false, reason: 'The proposal base differs from the version parent.' };
+    }
+
+    // Find the source message ID in messages
+    const proposalTitle = (proposalEvent.payload as any)?.title;
+    if (messages && messages.length > 0) {
+      const matchingMsg = messages.find(m => 
+        m.content.proposals && m.content.proposals.some((p: any) => 
+          p.title === proposalTitle || p.content === currentArtifact.content
+        )
+      );
+      if (matchingMsg) {
+        sourceMsgId = matchingMsg.id;
+      }
+    }
+  }
+
+  return {
+    isValid: true,
+    sourceMessageId: sourceMsgId || 'msg-local-operator',
+    proposalEventId: proposalEvent?.id || 'evt-manual-proposal',
+    harvestEventId: harvestEvent.id,
+    createdVersionId: currentVersionId,
+    currentVersionId: currentVersionId
+  };
+}
+
 
 // ============================================================================
 // LAYER 4: TAMPER FIXTURE PACKAGES FOR AUDIT TESTING

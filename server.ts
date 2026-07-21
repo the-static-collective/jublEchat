@@ -48,6 +48,11 @@ async function getAuthenticatedUser(req: express.Request) {
 }
 
 async function startServer() {
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !isSupabaseConfigured) {
+    throw new Error('SECURE_BACKEND_REQUIRED: Cannot run production server without live Supabase database credentials configured.');
+  }
+
   const app = express();
   const PORT = 3000;
 
@@ -72,6 +77,22 @@ async function startServer() {
 
       if (!serverSupabase || user.isMock) {
         return res.status(400).json({ error: "Server-side logging is only active in live Supabase mode." });
+      }
+
+      // Strict Event Type Allowlist: Restricts high-authority, state-changing event creation to prevent direct injection bypass
+      const ALLOWED_LOG_EVENT_TYPES = [
+        'user_feedback',
+        'manual_observation',
+        'note_captured',
+        'test_integrity_endpoint',
+        'user_action_logged'
+      ];
+
+      const { event_type } = eventData;
+      if (!ALLOWED_LOG_EVENT_TYPES.includes(event_type)) {
+        return res.status(403).json({
+          error: `Forbidden: Creation of high-authority or ledger-consequential event type '${event_type}' via the generic log endpoint is strictly restricted. Material updates must be authorized through command-specific endpoints.`
+        });
       }
 
       // 1. Fetch previous event hash to maintain cryptographic link chain
@@ -157,36 +178,52 @@ async function startServer() {
     }
   });
 
-  // Secure Server-side Harvest API (Evolve Idea, handles multiple mutations as an atomic transaction)
+  // Secure Server-side Harvest API (Evolve Idea, handles multiple mutations as an atomic database transaction)
   app.post("/api/harvest", async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);
-      const { idea_id, current_artifact_id, new_title, new_content, rationale, vm_id } = req.body;
+      const { idea_id, current_artifact_id, new_title, new_content, rationale, vm_id, expected_last_event_hash, actor, idempotency_key } = req.body;
 
       if (!serverSupabase || user.isMock) {
         return res.status(400).json({ error: "Server-side harvest is only active in live Supabase mode." });
       }
 
-      // 1. Create the new artifact
-      const { data: newArtifact, error: artErr } = await serverSupabase
-        .from('artifacts')
-        .insert({
-          vm_id,
-          title: new_title || 'Refined version',
-          content: new_content,
-          artifact_type: 'note',
-          origin: 'Evolved from previous version',
-          status: 'active',
-          parent_artifact_id: current_artifact_id,
-        })
-        .select()
-        .single();
-
-      if (artErr || !newArtifact) {
-        throw new Error(`Failed to create evolved artifact: ${artErr?.message}`);
+      // Assert actor is human; reject model-originated harvests
+      if (actor === 'ai' || actor === 'machine') {
+        return res.status(403).json({ error: "Forbidden: Evolving ideas via harvest is a strictly human-authenticated privilege." });
       }
 
-      // 2. Query next version number
+      // Resolve idempotency key
+      const finalIdempotencyKey = idempotency_key || `harvest-${idea_id}-${current_artifact_id}`;
+
+      // Fetch latest event hash to perform Compare-and-Swap (CAS) on ledger head
+      let lastHash = 'GENESIS_ANCHOR_v0.2';
+      const { data: latestEvents, error: fetchErr } = await serverSupabase
+        .from('events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (fetchErr) {
+        throw new Error(`Failed to fetch latest events: ${fetchErr.message}`);
+      }
+
+      if (latestEvents && latestEvents.length > 0) {
+        const latestEvent = latestEvents[0];
+        const p = typeof latestEvent.payload === 'string' 
+          ? JSON.parse(latestEvent.payload) 
+          : latestEvent.payload;
+        if (p && p._signature_hash) {
+          lastHash = p._signature_hash;
+        }
+      }
+
+      // If expected head is provided, perform CAS check server-side early
+      if (expected_last_event_hash && expected_last_event_hash !== lastHash) {
+        return res.status(409).json({ error: "LEDGER_HEAD_CHANGED" });
+      }
+
+      // Determine next version number for local hash calculation
       const { data: versions, error: verQueryErr } = await serverSupabase
         .from('idea_versions')
         .select('version_number')
@@ -201,47 +238,7 @@ async function startServer() {
 
       const nextVersion = (versions?.version_number ?? 0) + 1;
 
-      // 3. Write version link
-      const { error: verErr } = await serverSupabase.from('idea_versions').insert({
-        idea_id,
-        artifact_id: newArtifact.id,
-        version_number: nextVersion,
-      });
-
-      if (verErr) {
-        throw new Error(`Failed to record idea version: ${verErr.message}`);
-      }
-
-      // 4. Record derivation edge
-      await serverSupabase.from('edges').insert({
-        source_artifact_id: newArtifact.id,
-        target_artifact_id: current_artifact_id,
-        edge_type: 'DERIVES_FROM',
-      });
-
-      // 5. Update parent current_version_id
-      await serverSupabase.from('ideas').update({ current_version_id: newArtifact.id }).eq('id', idea_id);
-
-      // 6. Append the event log
-      // Fetch previous event hash to link
-      let lastHash = 'GENESIS_ANCHOR_v0.2';
-      const { data: latestEvents } = await serverSupabase
-        .from('events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (latestEvents && latestEvents.length > 0) {
-        const latestEvent = latestEvents[0];
-        const p = typeof latestEvent.payload === 'string' 
-          ? JSON.parse(latestEvent.payload) 
-          : latestEvent.payload;
-        if (p && p._signature_hash) {
-          lastHash = p._signature_hash;
-        }
-      }
-
-      const generatedId = crypto.randomUUID();
+      // Pre-compute the secure event signature hash
       const secureActor = {
         source: 'authenticated_session',
         id: user.id,
@@ -252,14 +249,15 @@ async function startServer() {
         idea_id,
         version: nextVersion,
         parent_artifact_id: current_artifact_id,
+        idempotency_key: finalIdempotencyKey,
         actor: secureActor,
         _signature_hash: ''
       };
 
       const tempEvent = {
-        id: generatedId,
+        id: crypto.randomUUID(),
         event_type: 'transformation_accepted',
-        entity_id: newArtifact.id,
+        entity_id: '00000000-0000-0000-0000-000000000000', // temporary placeholder for hash calc
         entity_type: 'artifact',
         actor: 'human',
         actor_id: user.email,
@@ -272,30 +270,38 @@ async function startServer() {
         witness_strength: 5,
       };
 
-      const finalHash = computeEventHash(tempEvent as any, lastHash);
-      finalPayload._signature_hash = finalHash;
+      const computedHash = computeEventHash(tempEvent as any, lastHash);
 
-      const { error: eventErr } = await serverSupabase.from('events').insert({
-        id: generatedId,
-        event_type: tempEvent.event_type,
-        entity_id: tempEvent.entity_id,
-        entity_type: tempEvent.entity_type,
-        actor: tempEvent.actor,
-        actor_id: tempEvent.actor_id,
-        capability: tempEvent.capability,
-        policy: tempEvent.policy,
-        payload: finalPayload,
-        created_at: tempEvent.created_at,
-        rationale: tempEvent.rationale,
-        source_proposal_id: tempEvent.source_proposal_id,
-        witness_strength: tempEvent.witness_strength,
+      // Invoke the fully atomic PostgreSQL RPC transaction
+      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('harvest_proposal_v2', {
+        p_idea_id: idea_id,
+        p_current_artifact_id: current_artifact_id,
+        p_new_title: new_title,
+        p_new_content: new_content,
+        p_rationale: rationale,
+        p_vm_id: vm_id,
+        p_actor_id: user.id,
+        p_actor_email: user.email,
+        p_idempotency_key: finalIdempotencyKey,
+        p_expected_last_event_hash: lastHash,
+        p_computed_hash: computedHash
       });
 
-      if (eventErr) {
-        throw new Error(`Failed to log harvest event: ${eventErr.message}`);
+      if (rpcErr) {
+        if (rpcErr.message.includes('BASE_VERSION_NO_LONGER_CURRENT')) {
+          return res.status(409).json({ error: "BASE_VERSION_NO_LONGER_CURRENT" });
+        }
+        if (rpcErr.message.includes('LEDGER_HEAD_CHANGED')) {
+          return res.status(409).json({ error: "LEDGER_HEAD_CHANGED" });
+        }
+        throw new Error(`Database transaction failed: ${rpcErr.message}`);
       }
 
-      res.json({ success: true, newArtifact });
+      res.json({
+        success: rpcResult.success,
+        is_duplicate: rpcResult.is_duplicate,
+        newArtifact: rpcResult.new_artifact
+      });
     } catch (error: any) {
       console.error("Server harvest error:", error);
       res.status(500).json({ error: error.message });
