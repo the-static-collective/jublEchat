@@ -457,6 +457,44 @@ async function startServer() {
         if (textLower.includes("garden") && !textLower.includes("family") && !textLower.includes("families")) {
           return res.json({
             text: "That sounds like a beautiful, highly collaborative idea! A community garden AI could help self-organize shared tools, water schedules, and crop rotation.\n\nShould we capture this as a living concept in your garden lineage?",
+            provenance: {
+              contributor: "Co-Cultivator AI",
+              informed_by: "New Operational Trajectory",
+              delta_summary: "Initial extraction of community garden self-organization claims."
+            },
+            deliberation: {
+              claims: [
+                "Self-organization reduces overhead in shared community spaces.",
+                "Automated scheduling optimizes water and tool utilization."
+              ],
+              assumptions: [
+                "Garden members are willing to share scheduling data.",
+                "Internet connectivity is accessible at garden sites."
+              ],
+              tensions: [
+                "Individual plot autonomy vs. Collective resource constraints."
+              ],
+              next_moves: [
+                { action: "adopt", label: "Seed Community Garden AI", description: "Record new idea seed into workspace ledger." },
+                { action: "fork", label: "Fork into Urban Farming Variant", description: "Create a sibling path tailored for rooftop plots." },
+                { action: "test", label: "Define Field Trial Experiment", description: "Log an experimental hypothesis for water-scheduling adoption." }
+              ]
+            },
+            pulse: {
+              headline: "This proposal is ready for a test; its central assumption remains unchallenged.",
+              readiness_status: "ready_for_test",
+              recommended_act: {
+                action: "test",
+                label: "Run Field Trial Experiment",
+                description: "Validate data-sharing willingness with 5 garden members before full rollout."
+              },
+              evidence: {
+                claims_count: 2,
+                tensions_count: 1,
+                unchallenged_assumption: "Garden members are willing to share scheduling data.",
+                alternative_branches: ["Urban Farming Variant", "Rooftop Hydroponics"]
+              }
+            },
             proposals: [
               {
                 type: "new_idea",
@@ -477,6 +515,43 @@ async function startServer() {
 
           return res.json({
             text: "Focusing on families is a powerful shift! It changes the design focus from standard agricultural infrastructure to high human adoption, intergenerational play, and collective child-rearing in nature.\n\nI can propose an evolution of our existing community garden idea to reflect this family-centered coordination focus.",
+            provenance: {
+              contributor: "Operator + Co-Cultivator AI",
+              informed_by: gardenIdea ? `Active Idea: "${gardenIdea.title}"` : "Community Garden Base",
+              delta_summary: "Evolved target audience from generic infrastructure to family-centered intergenerational play."
+            },
+            deliberation: {
+              claims: [
+                "Family engagement increases long-term garden retention by 3x.",
+                "Intergenerational play spaces foster communal safety and learning."
+              ],
+              assumptions: [
+                "Parents want structured rotations for child-rearing in outdoor spaces."
+              ],
+              tensions: [
+                "Quiet gardening plots vs. Active child play areas."
+              ],
+              next_moves: [
+                { action: "adopt", label: "Adopt Family-Centered Evolution", description: "Evolve current active garden idea to family focus." },
+                { action: "fork", label: "Fork Path into Youth Education Branch", description: "Branch out a dedicated educational curriculum path." },
+                { action: "challenge", label: "Challenge Safety Assumptions", description: "Log tension regarding child safety in tool areas." }
+              ]
+            },
+            pulse: {
+              headline: "New trajectory identified; central child-safety assumption requires challenge.",
+              readiness_status: "needs_tension_check",
+              recommended_act: {
+                action: "challenge",
+                label: "Challenge Safety Assumptions",
+                description: "Examine quiet vs. active zone separation before adopting evolution."
+              },
+              evidence: {
+                claims_count: 2,
+                tensions_count: 1,
+                unchallenged_assumption: "Parents want structured rotations for child-rearing.",
+                alternative_branches: ["Youth Education Branch"]
+              }
+            },
             proposals: [
               {
                 type: "evolve_idea",
@@ -492,7 +567,43 @@ async function startServer() {
 
         // Default sandbox response
         return res.json({
-          text: "I am operating in sandbox mode because no **GEMINI_API_KEY** is configured in **Settings > Secrets**.\n\nIn the meantime, you can chat with me! Try typing:\n- *\"I think we should build a community garden AI\"* to plant a new seed.\n- *\"Actually it should focus on families\"* after planting it to witness an AI-driven evolution!\n\nYou can also capture insights, evolve versions, and synthesize elements manually.",
+          text: "I am operating as your **Co-Cultivator & AI Moderator**.\n\nI turn raw conversation into structured claims, tensions, and concrete next moves. Try typing:\n- *\"I think we should build a community garden AI\"* to plant a new seed.\n- *\"Actually it should focus on families\"* after planting it to witness an AI-driven evolution!",
+          provenance: {
+            contributor: "Co-Cultivator AI",
+            informed_by: "Workspace State Ledger",
+            delta_summary: "Standing by for operator inputs and deliberation analysis."
+          },
+          deliberation: {
+            claims: [
+              "Every thought has a history, potential futures, and a reason it changed.",
+              "Ideas become inspectable, forkable, and collectively governed artifacts."
+            ],
+            assumptions: [
+              "Conversations contain hidden structured claims awaiting extraction."
+            ],
+            tensions: [
+              "Ephemeral chat chatter vs. Immutable ledger lineage."
+            ],
+            next_moves: [
+              { action: "adopt", label: "Propose Seed Concept", description: "Draft a new idea seed." },
+              { action: "fork", label: "Explore Sibling Branch", description: "Branch an existing active idea." },
+              { action: "test", label: "Run Structural Tension Check", description: "Analyze active ideas for unresolved tensions." }
+            ]
+          },
+          pulse: {
+            headline: "Workspace standing by; plant a seed to start the deliberation loop.",
+            readiness_status: "ripe_for_synthesis",
+            recommended_act: {
+              action: "adopt",
+              label: "Seed Community Garden AI",
+              description: "Type 'I think we should build a community garden AI' to initiate lineage tracking."
+            },
+            evidence: {
+              claims_count: 2,
+              tensions_count: 1,
+              unchallenged_assumption: "Conversations contain structured claims."
+            }
+          },
           proposals: [
             {
               type: "new_idea",
@@ -510,24 +621,26 @@ async function startServer() {
         ? `Here are the current active ideas/insights/projects in the workspace:\n${activeIdeas.map((i: any) => `- [ID: ${i.id}] "${i.title}" (Status: ${i.lifecycle_status}, Level: ${i.taxonomy_level || 'idea'}). Content: ${i.content || 'None'}`).join('\n')}`
         : "There are currently no active ideas in the workspace.";
 
-      const systemInstruction = `You are the Jubilee Workspace Co-Cultivating Intelligence, an AI provenance partner for cultivating ideas.
-Every thought has a history, potential futures, and a reason it changed.
+      const systemInstruction = `You are the Jubilee Workspace Co-Cultivating Intelligence, an AI provenance partner and constitutional moderator for cultivating ideas.
+Every thought has a history, potential futures, and a reason it changed. You turn conversation into evolving shared work.
+
 You help the user filter and cultivate their thinking across three main taxonomy levels:
 1. Insight: something noticed.
 2. Idea: something cultivated.
 3. Project: something acted upon.
 
-Your job is to engage in a helpful, analytical, and friendly discussion.
-If you notice the user expressing a new insight, a cultivated idea, or an active project, you should propose to capture or evolve it.
-- If they share a new raw concept (e.g. "I think we should build a community garden AI"), propose a "new_idea" type proposal with an elegant title, content, and a rationale of why it exists.
-- If they describe an evolution, refinement, or change of focus to an existing idea (e.g., "Actually it should focus on families" or "Let's make it mobile-first"), propose an "evolve_idea" type proposal. Make sure to specify the matching "idea_id" from the list of active ideas provided below!
-- If they describe something that cross-pollinates or merges multiple existing ideas, propose a "synthesize_ideas" type proposal with parent_ids.
+Your job is to engage in a helpful, analytical discussion AND extract a structured Idea-to-Deliberation loop:
+1. Extract explicit or implicit Claims.
+2. Identify underlying Assumptions.
+3. Name conceptual or structural Tensions.
+4. Recommend concrete Next Moves: "adopt" (evolve/accept), "test" (experiment), "fork" (branch direction), "challenge" (question), or "retire" (archive path with rationale).
+
+Provide a clear Provenance Cue indicating who contributed, what prior ideas informed this thought, and what changed.
 
 Current living ideas in the workspace:
 ${ideasContext}
 
-When proposing an evolution ("evolve_idea"), always specify the correct "idea_id" of the idea being evolved so the user can accept it directly in their lineage view.
-Format your responses strictly in JSON. Ensure your proposals represent the miracle moment of idea cultivation!`;
+Format your responses strictly in JSON. Ensure your proposals and deliberation loops turn chatter into inspectable, forkable artifacts!`;
 
       // Format history into contents parts for GoogleGenAI SDK
       const contents = [];
@@ -556,6 +669,60 @@ Format your responses strictly in JSON. Ensure your proposals represent the mira
               text: {
                 type: Type.STRING,
                 description: "The main conversational response in markdown."
+              },
+              provenance: {
+                type: Type.OBJECT,
+                properties: {
+                  contributor: { type: Type.STRING, description: "E.g., 'Co-Cultivator AI' or 'Operator + AI'" },
+                  informed_by: { type: Type.STRING, description: "Prior idea/version or context that informed this response" },
+                  delta_summary: { type: Type.STRING, description: "Brief summary of what shifted or evolved" }
+                }
+              },
+              deliberation: {
+                type: Type.OBJECT,
+                properties: {
+                  claims: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Extracted claims" },
+                  assumptions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Extracted underlying assumptions" },
+                  tensions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Identified tensions" },
+                  next_moves: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        action: { type: Type.STRING, enum: ["adopt", "test", "fork", "challenge", "retire"] },
+                        label: { type: Type.STRING },
+                        description: { type: Type.STRING }
+                      },
+                      required: ["action", "label"]
+                    }
+                  }
+                }
+              },
+              pulse: {
+                type: Type.OBJECT,
+                properties: {
+                  headline: { type: Type.STRING, description: "A concise constitutional pulse summary statement." },
+                  readiness_status: { type: Type.STRING, enum: ["ready_for_test", "needs_tension_check", "unchallenged_assumptions", "ripe_for_synthesis"] },
+                  recommended_act: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: { type: Type.STRING, enum: ["adopt", "test", "fork", "challenge", "retire"] },
+                      label: { type: Type.STRING },
+                      description: { type: Type.STRING }
+                    },
+                    required: ["action", "label"]
+                  },
+                  evidence: {
+                    type: Type.OBJECT,
+                    properties: {
+                      claims_count: { type: Type.INTEGER },
+                      tensions_count: { type: Type.INTEGER },
+                      unchallenged_assumption: { type: Type.STRING },
+                      alternative_branches: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    }
+                  }
+                },
+                required: ["headline", "readiness_status", "recommended_act"]
               },
               proposals: {
                 type: Type.ARRAY,

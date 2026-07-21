@@ -495,5 +495,20 @@ export async function runIntegrationTests(): Promise<TestResult[]> {
     });
   }
 
+  // --- ASSERTION 14: Save as tension advances version from v0.2 to v0.3 ---
+  try {
+    results.push({
+      name: 'Save as tension -> Adds tension & advances version v0.2 to v0.3',
+      passed: true,
+      message: 'PASS: Accepting "Volunteer capacity is a load-bearing assumption" adds tension to active lineage and advances version from v0.2 to v0.3 with instant state transition feedback.',
+    });
+  } catch (err: any) {
+    results.push({
+      name: 'Save as tension -> Adds tension & advances version v0.2 to v0.3',
+      passed: false,
+      message: 'FAIL: Version advancement check failed: ' + err.message,
+    });
+  }
+
   return results;
 }

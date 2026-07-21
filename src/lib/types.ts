@@ -186,6 +186,50 @@ export interface JubileeEvent {
   ledger_sequence?: number;
 }
 
+export interface ProvenanceCue {
+  contributor: string;
+  informed_by: string;
+  delta_summary: string;
+}
+
+export interface NextMoveItem {
+  action: 'adopt' | 'test' | 'fork' | 'challenge' | 'retire';
+  label: string;
+  description?: string;
+}
+
+export interface DeliberationLoop {
+  claims?: string[];
+  assumptions?: string[];
+  tensions?: string[];
+  next_moves?: NextMoveItem[];
+}
+
+export interface ConstitutionalPulse {
+  headline: string;
+  readiness_status: 'ready_for_test' | 'needs_tension_check' | 'unchallenged_assumptions' | 'ripe_for_synthesis';
+  recommended_act: NextMoveItem;
+  evidence?: {
+    claims_count?: number;
+    tensions_count?: number;
+    unchallenged_assumption?: string;
+    alternative_branches?: string[];
+  };
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'model' | 'system';
+  content: {
+    text: string;
+    provenance?: ProvenanceCue;
+    deliberation?: DeliberationLoop;
+    pulse?: ConstitutionalPulse;
+    proposals?: any[];
+  };
+  created_at: string;
+}
+
 export interface Proposal {
   id: string;
   transformation_id: string;

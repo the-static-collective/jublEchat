@@ -219,109 +219,115 @@ const SEED_DATA: Record<string, any[]> = {
       created_at: '2026-07-20T22:08:21Z',
     }
   ],
-  artifacts: [
-    {
-      id: 'art-01',
-      vm_id: 'a0000000-0000-0000-0000-000000000001',
-      title: 'Primary Jubilee Core',
-      content: 'An event-sourced workspace where every artifact has a past, a current form, possible futures, and a reason it changed.',
-      artifact_type: 'note',
-      origin: 'System Init',
-      status: 'active',
-      parent_artifact_id: null,
-      created_at: '2026-07-20T22:10:00Z',
-    },
-    {
-      id: 'art-02',
-      vm_id: 'a0000000-0000-0000-0000-000000000002',
-      title: 'Local Memory Substrate',
-      content: 'Designing a robust local-storage persistence module to allow instant client-side execution when offline or detached from Supabase.',
-      artifact_type: 'thought',
-      origin: 'System Init',
-      status: 'active',
-      parent_artifact_id: null,
-      created_at: '2026-07-20T22:12:00Z',
-    }
-  ],
-  claims: [
-    {
-      id: 'claim-01',
-      artifact_id: 'art-01',
-      text: 'Provable history of all transitions is preserved.',
-      confidence: 1.0,
-      created_at: '2026-07-20T22:10:30Z',
-    }
-  ],
-  transformations: [],
-  edges: [],
-  receipts: [],
-  events: [
-    {
-      id: 'evt-01',
-      event_type: 'vm_created',
-      entity_id: 'a0000000-0000-0000-0000-000000000001',
-      entity_type: 'vm',
-      actor: 'system',
-      actor_id: 'Root Substrate',
-      capability: 'system-init',
-      policy: 'v0.1',
-      payload: { name: 'Workspace Core' },
-      created_at: '2026-07-20T22:08:21Z',
-      rationale: 'Initializing Workspace Core substrate.',
-      source_proposal_id: null,
-      witness_strength: 5,
-    },
-    {
-      id: 'evt-02',
-      event_type: 'artifact_created',
-      entity_id: 'art-01',
-      entity_type: 'artifact',
-      actor: 'system',
-      actor_id: 'Root Substrate',
-      capability: 'system-init',
-      policy: 'v0.1',
-      payload: { title: 'Primary Jubilee Core' },
-      created_at: '2026-07-20T22:10:00Z',
-      rationale: 'Primary core note setup.',
-      source_proposal_id: null,
-      witness_strength: 5,
-    }
-  ],
-  proposals: [],
   ideas: [
     {
-      id: 'idea-01',
-      title: 'Primary Jubilee Core',
-      current_version_id: 'art-01',
+      id: 'idea-mpls-01',
+      title: 'Make Minneapolis neighborhood cooling mutual-aid infrastructure',
+      current_version_id: 'art-mpls-v02',
       lifecycle_status: 'active',
       taxonomy_level: 'idea',
-      created_at: '2026-07-20T22:10:00Z',
-    },
-    {
-      id: 'idea-02',
-      title: 'Local Memory Substrate',
-      current_version_id: 'art-02',
-      lifecycle_status: 'active',
-      taxonomy_level: 'insight',
-      created_at: '2026-07-20T22:12:00Z',
+      created_at: '2026-07-21T10:00:00Z',
     }
   ],
   idea_versions: [
     {
-      id: 'id-v-01',
-      idea_id: 'idea-01',
-      artifact_id: 'art-01',
+      id: 'id-v-mpls-01',
+      idea_id: 'idea-mpls-01',
+      artifact_id: 'art-mpls-v01',
       version_number: 1,
-      created_at: '2026-07-20T22:10:00Z',
+      created_at: '2026-07-20T22:00:00Z',
     },
     {
-      id: 'id-v-02',
-      idea_id: 'idea-02',
-      artifact_id: 'art-02',
-      version_number: 1,
-      created_at: '2026-07-20T22:12:00Z',
+      id: 'id-v-mpls-02',
+      idea_id: 'idea-mpls-01',
+      artifact_id: 'art-mpls-v02',
+      version_number: 2,
+      created_at: '2026-07-21T10:00:00Z',
     }
-  ]
+  ],
+  artifacts: [
+    {
+      id: 'art-mpls-v01',
+      vm_id: 'a0000000-0000-0000-0000-000000000001',
+      title: 'v0.1 Initial observation',
+      content: 'Neighborhood extreme heat response requires localized shade & water points across vulnerable urban corridors.',
+      artifact_type: 'thought',
+      origin: 'Initial Observation',
+      status: 'active',
+      parent_artifact_id: null,
+      created_at: '2026-07-20T22:00:00Z',
+    },
+    {
+      id: 'art-mpls-v02',
+      vm_id: 'a0000000-0000-0000-0000-000000000001',
+      title: 'v0.2 Proposed cooling-network model',
+      content: 'Deploy community-managed shade hubs with ice distribution across 4 high-risk zones. Depends on recurring volunteer shift coverage.',
+      artifact_type: 'note',
+      origin: 'Proposed Cooling-Network Model',
+      status: 'active',
+      parent_artifact_id: 'art-mpls-v01',
+      created_at: '2026-07-21T10:00:00Z',
+    }
+  ],
+  claims: [
+    {
+      id: 'claim-mpls-01',
+      artifact_id: 'art-mpls-v02',
+      text: 'Volunteer shift coverage required across 4 cooling hubs.',
+      confidence: 0.9,
+      created_at: '2026-07-21T10:05:00Z',
+    }
+  ],
+  transformations: [],
+  edges: [
+    {
+      id: 'edge-mpls-01',
+      source_artifact_id: 'art-mpls-v02',
+      target_artifact_id: 'art-mpls-v01',
+      edge_type: 'DERIVES_FROM',
+      created_at: '2026-07-21T10:00:00Z'
+    }
+  ],
+  receipts: [],
+  events: [
+    {
+      id: 'evt-mpls-01',
+      event_type: 'artifact_created',
+      entity_id: 'art-mpls-v01',
+      entity_type: 'artifact',
+      actor: 'human',
+      actor_id: 'Community Witness',
+      capability: 'system-init',
+      policy: 'v0.1',
+      payload: { title: 'v0.1 Initial observation', idea_id: 'idea-mpls-01' },
+      created_at: '2026-07-20T22:00:00Z',
+      rationale: 'Initial observation captured for neighborhood cooling.',
+      source_proposal_id: null,
+      witness_strength: 5,
+    },
+    {
+      id: 'evt-mpls-02',
+      event_type: 'transformation_accepted',
+      entity_id: 'art-mpls-v02',
+      entity_type: 'artifact',
+      actor: 'system',
+      actor_id: 'Co-Cultivator AI',
+      capability: 'evolve-idea',
+      policy: 'v0.2',
+      payload: { 
+        idea_id: 'idea-mpls-01', 
+        version: 2, 
+        parent_artifact_id: 'art-mpls-v01',
+        tensions: ['volunteer capacity unknown'],
+        archived_siblings: ['city-led approach']
+      },
+      created_at: '2026-07-21T10:00:00Z',
+      rationale: 'Proposed cooling-network model with community hubs.',
+      source_proposal_id: null,
+      witness_strength: 5,
+    }
+  ],
+  proposals: []
 };
 
 const mockAuthChangeListeners: ((event: string, session: any) => void)[] = [];

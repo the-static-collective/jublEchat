@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Sprout, ArrowUp, GitBranch, X, Search, Plus, Leaf, Recycle, Moon, Trash2 } from 'lucide-react';
+import { Sprout, ArrowUp, GitBranch, X, Search, Plus, Leaf, Recycle, Moon, Trash2, Archive } from 'lucide-react';
 import { useIdeas, useIdeaVersions, useArtifacts, useEvents, createIdea, evolveIdea, updateIdeaLifecycle, recordPathAbandoned } from '../lib/hooks';
 import { formatDate } from '../lib/constants';
 import { WITNESS_LABELS, type Idea, type LifecycleStatus } from '../lib/types';
@@ -132,6 +132,7 @@ function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
   const { events, refetch: refetchEvents } = useEvents();
   const meta = LIFECYCLE_META[idea.lifecycle_status];
 
+  const [showFullHistory, setShowFullHistory] = useState(false);
   const [abandoningVersionId, setAbandoningVersionId] = useState<string | null>(null);
   const [abandonRationale, setAbandonRationale] = useState('');
   const [abandonBusy, setAbandonBusy] = useState(false);
@@ -171,33 +172,79 @@ function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
             <div className="flex items-center gap-2 mb-2">
               <div className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }} />
               <span className="text-xs font-medium" style={{ color: meta.color }}>{meta.label}</span>
+              <span className="text-[10px] text-slate-500 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                v0.{lineageVersions.length || 1}
+              </span>
             </div>
             <h3 className="text-xl font-bold text-slate-100">{idea.title}</h3>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onEvolve}
-              className="flex items-center gap-1.5 rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/30"
+              className="flex items-center gap-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/30 cursor-pointer"
             >
               <ArrowUp className="h-3.5 w-3.5" />
-              Evolve
+              Evolve Direction
             </button>
           </div>
         </div>
 
-        {/* Current version */}
+        {/* Current Active Form (Show by default) */}
         {lineageVersions[0] && (
           <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 mb-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400 mb-2">Current — v{lineageVersions[0].version_number}</div>
+            <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-cyan-400 mb-2">
+              <span>Active Form — v{lineageVersions[0].version_number}</span>
+              <span className="text-slate-500 font-mono">Current Reference</span>
+            </div>
             <p className="text-sm text-slate-200">{lineageVersions[0].artifact?.content || lineageVersions[0].artifact?.title}</p>
-            <div className="mt-2 text-[10px] text-slate-500">{formatDate(lineageVersions[0].artifact?.created_at ?? '')}</div>
+            <div className="mt-2 text-[10px] text-slate-500 flex items-center justify-between">
+              <span>Last modified: {formatDate(lineageVersions[0].artifact?.created_at ?? '')}</span>
+              <span className="text-cyan-400/80 font-mono">SHA-256 Verified Link</span>
+            </div>
           </div>
         )}
 
-        {/* Ancestry */}
+        {/* Primary Recommended Pending Decision (Show by default) */}
+        <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-3.5 mb-4 flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Leaf className="h-3.5 w-3.5 text-amber-400" />
+              <span>Recommended Next Decision</span>
+            </div>
+            <p className="text-xs text-slate-300 font-medium">
+              {lineageVersions.length > 1
+                ? "Run field experiment to validate current evolution assumptions."
+                : "Propose next evolution or branch a sibling path."}
+            </p>
+          </div>
+          <button
+            onClick={onEvolve}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
+          >
+            Evolve Now
+          </button>
+        </div>
+
+        {/* Reveal on Intent: Toggle for Full History & Forks */}
         {lineageVersions.length > 1 && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-3">Ancestry</div>
+          <div className="pt-2 border-t border-slate-800/60">
+            <button
+              type="button"
+              onClick={() => setShowFullHistory(!showFullHistory)}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 text-xs font-semibold transition flex items-center justify-between cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <GitBranch className="h-3.5 w-3.5 text-cyan-400" />
+                <span>
+                  {showFullHistory ? "Hide Lineage Ledger Details" : `Inspect History, Forks & Ledger Details (${lineageVersions.length - 1} prior version${lineageVersions.length > 2 ? 's' : ''})`}
+                </span>
+              </span>
+              <span className="text-slate-500 font-mono text-[11px]">{showFullHistory ? "▲ Collapse" : "▼ Reveal"}</span>
+            </button>
+
+            {showFullHistory && (
+              <div className="mt-4 space-y-4 animate-fadeIn">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-3">Ancestry & Archived Trajectories</div>
             <div className="space-y-0">
               {lineageVersions.slice(1).map((v, i) => {
                 const abandonEvent = events.find(e => {
@@ -217,9 +264,15 @@ function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
                     <div className="ml-2">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="text-xs text-slate-500 font-mono">v{v.version_number}</span>
-                        <span className="text-[10px] text-slate-600 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Historical form</span>
+                        {abandonEvent ? (
+                          <span className="text-[10px] text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30 font-medium">
+                            📦 Archived Sibling Path
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-600 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Historical form</span>
+                        )}
                       </div>
-                      <p className={`text-sm ${abandonEvent ? 'text-slate-500 line-through opacity-80' : 'text-slate-400'}`}>
+                      <p className="text-sm text-slate-300">
                         {v.artifact?.content || v.artifact?.title}
                       </p>
                       <div className="text-[10px] text-slate-600 mt-0.5">{formatDate(v.artifact?.created_at ?? '')}</div>
@@ -227,12 +280,17 @@ function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
                     {(() => {
                       if (abandonEvent) {
                         return (
-                          <div className="ml-2 mt-2 p-2 bg-rose-950/10 border border-rose-500/10 rounded-lg text-rose-300 space-y-1">
-                            <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1">
-                              <span>⊘ Path later declared abandoned</span>
+                          <div className="ml-2 mt-2 p-2.5 bg-amber-950/20 border border-amber-500/20 rounded-xl text-amber-200 space-y-1 shadow-sm">
+                            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                              <Archive className="h-3 w-3 text-amber-400" />
+                              <span>Archived Trajectory — Preserved in Lineage Ledger</span>
                             </p>
-                            <p className="text-xs italic text-slate-300">"Reason: {abandonEvent.rationale || 'No rationale given.'}"</p>
-                            <p className="text-[8px] text-slate-500">Witnessed at {formatDate(abandonEvent.created_at)}</p>
+                            <p className="text-xs italic text-slate-300 bg-slate-950/40 p-2 rounded-lg border border-slate-800/80 mt-1">
+                              "{abandonEvent.rationale || 'Retired path to focus on current active evolution.'}"
+                            </p>
+                            <p className="text-[9px] text-slate-500 pt-0.5">
+                              Witnessed at {formatDate(abandonEvent.created_at)} • Preserved in immutable event history
+                            </p>
                           </div>
                         );
                       } else if (abandoningVersionId === v.artifact_id) {
@@ -290,6 +348,8 @@ function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
             </div>
           </div>
         )}
+      </div>
+    )}
 
         {/* Rationale events */}
         {rationaleEvents.length > 0 && (

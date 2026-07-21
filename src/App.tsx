@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  Sprout, Leaf, Send, HelpCircle, GitMerge, Clock, Check, X,
+  Sprout, Leaf, Send, HelpCircle, GitMerge, GitBranch, Clock, Check, X,
   RefreshCw, Plus, MessageSquare, Sparkles, AlertTriangle, Network, PlusCircle, ArrowLeft,
   Shield, Database, Terminal, CheckCircle2, AlertCircle, History, ArrowDown, ShieldCheck, Flame
 } from 'lucide-react';
@@ -10,27 +10,9 @@ import {
   createIdea, evolveIdea, logEvent, synthesizeIdeas
 } from './lib/hooks';
 import { GraphCanvas } from './components/GraphCanvas';
-import { type TaxonomyLevel } from './lib/types';
+import { type TaxonomyLevel, type ChatMessage, type ProvenanceCue, type DeliberationLoop } from './lib/types';
 import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents, verifyStrictAncestryPath } from './lib/ledger';
 import { runIntegrationTests, type TestResult } from './lib/test-boundary';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'model';
-  content: {
-    text: string;
-    proposals?: Array<{
-      type: 'new_idea' | 'evolve_idea' | 'synthesize_ideas';
-      title: string;
-      content: string;
-      rationale: string;
-      taxonomy_level?: 'insight' | 'idea' | 'project';
-      idea_id?: string;
-      parent_ids?: string[];
-    }>;
-  };
-  created_at: string;
-}
 
 // Simple Custom Markdown Renderer to support bold, bullet points, and code styling safely
 function SimpleMarkdown({ text }: { text: string }) {
@@ -169,6 +151,15 @@ function AppContent() {
   // Search & Filters
   const [search, setSearch] = useState('');
   const [taxonomyFilter, setTaxonomyFilter] = useState<'all' | 'insight' | 'idea' | 'project' | 'inactive'>('all');
+  const [interfaceMode, setInterfaceMode] = useState<'moderator' | 'architect'>('moderator');
+  const [architectNavTab, setArchitectNavTab] = useState<'events' | 'ideas' | 'versions' | 'tensions' | 'commands' | 'receipts'>('events');
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+
+  const activeSelectedEvent = useMemo(() => {
+    if (!events || events.length === 0) return null;
+    return events.find((e) => e.id === selectedEventId) || events[0];
+  }, [events, selectedEventId]);
+
   const [showGraph, setShowGraph] = useState(false);
   const [highlightWhyExist, setHighlightWhyExist] = useState(false);
 
@@ -182,9 +173,34 @@ function AppContent() {
   const [boundaryTestResults, setBoundaryTestResults] = useState<TestResult[] | null>(null);
   const [boundaryTestingRunning, setBoundaryTestingRunning] = useState(false);
 
+  // Recomposed Workspace States
+  const [pulseMuted, setPulseMuted] = useState(false);
+  const [showPulseWhyModal, setShowPulseWhyModal] = useState(false);
+  const [workingMaterialTab, setWorkingMaterialTab] = useState<'insights' | 'tensions' | 'experiments'>('tensions');
+  const [showSiblingPaths, setShowSiblingPaths] = useState(false);
+  const [stateTransitionFeedback, setStateTransitionFeedback] = useState<{
+    headline: string;
+    content: string;
+    version: string;
+  } | null>(null);
+
+  // Progressive Commitment Toggle States
+  const [expandedDeliberationIds, setExpandedDeliberationIds] = useState<Record<string, boolean>>({});
+  const [expandedToolbarIds, setExpandedToolbarIds] = useState<Record<string, boolean>>({});
+  const [expandedPulseIds, setExpandedPulseIds] = useState<Record<string, boolean>>({});
+
   // Maps & Derivations
   const artifactMap = useMemo(() => new Map(artifacts.map((a) => [a.id, a])), [artifacts]);
-  const selectedIdea = useMemo(() => ideas.find((i) => i.id === selectedIdeaId), [ideas, selectedIdeaId]);
+
+  // Auto-select active Minneapolis cooling idea by default
+  useEffect(() => {
+    if (ideas && ideas.length > 0 && !selectedIdeaId) {
+      const defaultIdea = ideas.find(i => i.id === 'idea-mpls-01') || ideas[0];
+      setSelectedIdeaId(defaultIdea.id);
+    }
+  }, [ideas, selectedIdeaId]);
+
+  const selectedIdea = useMemo(() => ideas.find((i) => i.id === selectedIdeaId) || ideas[0], [ideas, selectedIdeaId]);
   
   const currentArtifact = useMemo(() => {
     if (!selectedIdea?.current_version_id) return null;
@@ -202,18 +218,32 @@ function AppContent() {
       try {
         setMessages(JSON.parse(saved));
       } catch (e) {
-        // Reset if corrupted
         localStorage.removeItem('jubilee_chat_messages');
       }
     } else {
-      // Welcome seed
+      // Welcome seed featuring Minneapolis Cooling Infrastructure & Proposal Card
       const welcome: ChatMessage[] = [
         {
           id: 'welcome-msg',
           role: 'model',
           content: {
-            text: "Welcome, Operator, to the **Conversation Garden** (Jubilee v0.2).\n\nHere, thoughts are cultivated as organic, event-sourced entities. As we discuss, you can **hover over any message** to capture its essence instantly into our lineage ledger across three levels:\n\n1. 🧠 **Insights**: Raw observations or spark seeds (e.g., 'Noticed latency spikes on cold start').\n2. 🌱 **Ideas**: Cultivated, structured concepts ready for refinement (e.g., 'Dynamic ServiceWorker offline sync').\n3. 🚀 **Projects**: Active, operational pursuits with execution pathways (e.g., 'Build offline.ts file sync utility').\n\nLet's cultivate our shared memory substrate. What are we thinking?",
-            proposals: []
+            text: "We are cultivating **Make Minneapolis neighborhood cooling mutual-aid infrastructure** (Exploring · v0.2 · 3 contributors).\n\nThe current proposed model deploys community-managed shade hubs with ice distribution across 4 high-risk zones.",
+            provenance: {
+              contributor: "Co-Cultivator AI",
+              informed_by: "v0.2 Cooling-Network Model",
+              delta_summary: "Highlighted load-bearing volunteer shift dependency"
+            },
+            proposals: [
+              {
+                id: 'prop-seed-1',
+                type: 'tension',
+                title: 'Volunteer capacity is a load-bearing assumption.',
+                content: 'The v0.2 cooling hub model assumes recurring volunteer availability without proof of shift coverage during peak heatwaves.',
+                rationale: 'Surfaced via Constitutional Pulse: shift staffing unverified across 4 zones.',
+                taxonomy_level: 'idea',
+                action_label: 'Save as tension'
+              }
+            ]
           },
           created_at: new Date().toISOString()
         }
@@ -315,6 +345,8 @@ function AppContent() {
         role: 'model',
         content: {
           text: data.text,
+          provenance: data.provenance,
+          deliberation: data.deliberation,
           proposals: data.proposals || []
         },
         created_at: new Date().toISOString()
@@ -725,6 +757,56 @@ function AppContent() {
     }
   };
 
+  const handleSaveTensionAction = async (proposal?: any) => {
+    const headline = proposal?.title || proposal?.content || "Volunteer capacity is a load-bearing assumption";
+    const currentIdea = selectedIdea || ideas[0];
+    if (!currentIdea) return;
+
+    const currentArt = currentIdea.current_version_id ? artifactMap.get(currentIdea.current_version_id) : null;
+    const vm_id = currentArt?.vm_id || 'a0000000-0000-0000-0000-000000000001';
+
+    await evolveIdea({
+      idea_id: currentIdea.id,
+      current_artifact_id: currentIdea.current_version_id || 'art-mpls-v02',
+      new_title: `v0.3 Proposed cooling-network model`,
+      new_content: `Deploy community-managed shade hubs with ice distribution across 4 high-risk zones.\n\n[Accepted Tension]: ${headline}`,
+      rationale: `Accepted tension into active idea lineage: "${headline}"`,
+      vm_id,
+      preserved_tensions: [{ id: `tension-${Date.now()}`, text: headline }]
+    });
+
+    await logEvent({
+      event_type: 'transformation_accepted',
+      entity_id: currentIdea.id,
+      entity_type: 'idea',
+      actor: 'human',
+      actor_id: 'Operator',
+      capability: 'tension-capture',
+      policy: 'v0.3',
+      payload: { tension: headline, idea_id: currentIdea.id, new_version: 'v0.3' },
+      rationale: `Saved tension "${headline}" to active idea.`,
+      witness_strength: 5
+    });
+
+    await Promise.all([
+      refetchIdeas(),
+      refetchArtifacts(),
+      refetchEvents(),
+      refetchEdges(),
+      refetchVersions()
+    ]);
+
+    setStateTransitionFeedback({
+      headline: 'Saved to active idea',
+      content: `Tension: ${headline}`,
+      version: 'v0.3'
+    });
+
+    setTimeout(() => {
+      setStateTransitionFeedback(null);
+    }, 7000);
+  };
+
   const handleClearChatHistory = () => {
     if (confirm("Are you sure you want to clear your conversation substrate?")) {
       localStorage.removeItem('jubilee_chat_messages');
@@ -732,8 +814,11 @@ function AppContent() {
     }
   };
 
+  const selectedIdeaVersions = allIdeaVersions.filter(v => v.idea_id === (selectedIdea?.id || 'idea-mpls-01'));
+  const activeVersionLabel = selectedIdeaVersions.length > 0 ? `v0.${selectedIdeaVersions[0].version_number}` : 'v0.2';
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="h-dvh overflow-hidden flex flex-col bg-slate-950 text-slate-100 font-sans">
       {/* Background Orbs */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
         <div className="absolute -top-40 -left-40 h-[480px] w-[480px] rounded-full bg-cyan-500/5 blur-[120px]" />
@@ -742,21 +827,49 @@ function AppContent() {
       </div>
 
       {/* Header Bar */}
-      <header className="relative z-10 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur-xl px-6 py-4 flex items-center justify-between">
+      <header className="shrink-0 relative z-20 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur-xl px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 via-teal-400 to-violet-500 flex items-center justify-center shadow-lg shadow-cyan-500/10">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-400 via-teal-400 to-violet-500 flex items-center justify-center shadow-lg shadow-cyan-500/10">
               <Sprout className="h-5 w-5 text-slate-950 font-bold" />
             </div>
-            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
+            <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-slate-950" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-sm font-bold text-slate-100">Jubilee</h1>
-              <span className="text-[10px] bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-mono font-medium">v0.2</span>
+              <span className="text-[10px] bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-1.5 py-0.2 rounded font-mono font-medium">v0.2</span>
             </div>
-            <p className="text-[10px] text-slate-400">The Conversation Garden Substrate</p>
+            <p className="text-[10px] text-slate-400">The Living Idea Workspace</p>
           </div>
+        </div>
+
+        {/* Interface Mode Switcher Toggle */}
+        <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800/80 shadow-inner">
+          <button
+            type="button"
+            onClick={() => setInterfaceMode('moderator')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+              interfaceMode === 'moderator'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sprout className="h-3.5 w-3.5" />
+            <span>🌿 Co-Cultivate</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setInterfaceMode('architect')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+              interfaceMode === 'architect'
+                ? 'bg-violet-500 text-white shadow-md shadow-violet-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Network className="h-3.5 w-3.5" />
+            <span>🔬 Inspect System</span>
+          </button>
         </div>
 
         {/* Header Stats & Meta */}
@@ -777,11 +890,11 @@ function AppContent() {
           </div>
         </div>
 
-        {/* Sign Out & Controls */}
+        {/* Controls */}
         <div className="flex items-center gap-3">
           <button
             onClick={handleClearChatHistory}
-            className="text-[10px] text-slate-500 hover:text-slate-300 transition bg-slate-900 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5"
+            className="text-[10px] text-slate-500 hover:text-slate-300 transition bg-slate-900 border border-slate-800/80 rounded-lg px-2.5 py-1 flex items-center gap-1.5"
             title="Reset Chat History"
           >
             <RefreshCw className="h-3 w-3" />
@@ -789,7 +902,7 @@ function AppContent() {
           </button>
           <div className="w-px h-4 bg-slate-800 hidden sm:block" />
           <div className="items-center gap-2 hidden sm:flex">
-            <div className="h-7 w-7 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 border border-slate-700/50">
+            <div className="h-6 w-6 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 border border-slate-700/50">
               {user?.email?.[0].toUpperCase()}
             </div>
             <button
@@ -802,99 +915,902 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Workspace Arena: Split Screen */}
-      <div className="flex-1 relative z-10 grid grid-cols-1 lg:grid-cols-12 overflow-hidden h-[calc(100vh-73px)]">
-        
-        {/* ================= LEFT PANE: CONVERSATIONAL SUBSTRATE (lg:col-span-5) ================= */}
-        <section className="lg:col-span-5 border-r border-slate-800/50 flex flex-col bg-slate-950/40 h-full overflow-hidden">
-          {/* Section Header */}
-          <div className="px-6 py-4 border-b border-slate-800/40 bg-slate-950/20 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-cyan-400" />
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">Conversational Substrate</h2>
+      {/* FIXED IDEA HEADER */}
+      <div className="shrink-0 relative z-20 bg-slate-950/90 border-b border-slate-800/80 px-6 py-3 backdrop-blur-md shadow-md">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/30 text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-widest">
+              IDEA
+            </span>
+            <h2 className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
+              {selectedIdea?.title || "Make Minneapolis neighborhood cooling mutual-aid infrastructure"}
+            </h2>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700/60 text-xs font-semibold text-slate-300 font-mono">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              Exploring · {activeVersionLabel} · 3 contributors
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setShowGraph(false);
+                setShowAuditConsole(false);
+              }}
+              className="px-3 py-1 rounded-lg bg-slate-900 border border-slate-700/60 hover:border-cyan-500/50 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <GitBranch className="h-3.5 w-3.5 text-cyan-400" />
+              <span>Open lineage</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const reviewMsg: ChatMessage = {
+                  id: `review-${Date.now()}`,
+                  role: 'system',
+                  content: {
+                    text: `👥 **Deliberation Review Requested!**\n\nInvited workspace witnesses to review active proposal (${activeVersionLabel}). Logged in event history with rating: ★★★★★.`
+                  },
+                  created_at: new Date().toISOString()
+                };
+                setMessages(prev => [...prev, reviewMsg]);
+              }}
+              className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 hover:bg-cyan-500/30 text-xs font-semibold text-cyan-300 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
+              <span>Invite review</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex items-center gap-2 pt-2 border-t border-slate-850 text-xs">
+          <span className="font-mono text-[10px] font-bold text-amber-400 uppercase tracking-wider shrink-0">
+            CURRENT QUESTION
+          </span>
+          <span className="text-slate-300 italic font-medium truncate">
+            "What assumption must we test before committing?"
+          </span>
+        </div>
+      </div>
+
+      {/* FIXED CONSTITUTIONAL PULSE STRIP */}
+      {!pulseMuted && (
+        <div className="shrink-0 relative z-20 bg-slate-950 border-b border-amber-500/30 px-6 py-2 flex flex-wrap items-center justify-between gap-3 text-xs shadow-inner">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-amber-400 font-mono font-bold text-[11px] uppercase tracking-wider shrink-0">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+              </span>
+              <span>◌ CONSTITUTIONAL PULSE</span>
             </div>
-            <div className="flex items-center gap-1 text-[10px] text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-              <Sparkles className="h-3 w-3 text-cyan-400" />
-              AI Partner Active
+
+            <div className="flex flex-wrap items-center gap-2 text-slate-200">
+              <span className="font-semibold text-amber-200">
+                Assumption unchallenged: volunteer capacity has not been tested.
+              </span>
+              <span className="text-slate-500 hidden md:inline">•</span>
+              <span className="text-slate-400 text-[11px] hidden md:inline">
+                Recommended act: <strong className="text-cyan-300">Challenge assumption</strong>
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleSaveTensionAction()}
+              className="px-3 py-1 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shadow-sm cursor-pointer flex items-center gap-1"
+            >
+              <Sparkles className="h-3 w-3 text-slate-950" />
+              Challenge
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStateTransitionFeedback({
+                  headline: 'Deferred Constitutional Pulse',
+                  content: 'Assumption deferred for subsequent review.',
+                  version: activeVersionLabel
+                });
+                setTimeout(() => setStateTransitionFeedback(null), 4000);
+              }}
+              className="px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-slate-300 hover:text-slate-100 text-xs transition cursor-pointer"
+            >
+              Accept for now
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowPulseWhyModal(true)}
+              className="px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-cyan-400 hover:text-cyan-300 text-xs transition cursor-pointer font-mono"
+            >
+              Why?
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPulseMuted(true)}
+              className="px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-slate-500 hover:text-slate-300 text-xs transition cursor-pointer"
+              title="Mute advisor"
+            >
+              Mute
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STATE TRANSITION FEEDBACK TOAST */}
+      {stateTransitionFeedback && (
+        <div className="shrink-0 relative z-30 bg-emerald-950/95 border-b border-emerald-500/40 px-6 py-2.5 flex items-center justify-between text-xs text-emerald-200 animate-slideDown shadow-xl">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shrink-0" />
+            <div>
+              <span className="font-bold text-emerald-300 uppercase text-[10px] tracking-wider block">
+                {stateTransitionFeedback.headline}
+              </span>
+              <span className="font-semibold text-slate-100">
+                "{stateTransitionFeedback.content}"
+              </span>
+              <span className="text-emerald-400 ml-2 font-mono text-[11px]">
+                — Now shaping {stateTransitionFeedback.version}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowAuditConsole(false);
+              setShowGraph(false);
+            }}
+            className="text-xs font-bold text-emerald-300 hover:text-white underline cursor-pointer shrink-0"
+          >
+            View change ➔
+          </button>
+        </div>
+      )}
+
+      {/* MODE TRANSITION BANNER WHEN IN INSPECT SYSTEM MODE */}
+      {interfaceMode === 'architect' && (
+        <div className="shrink-0 bg-violet-950/90 border-b border-violet-500/40 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs z-20 shadow-lg animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <span className="px-2 py-0.5 rounded bg-violet-500/20 border border-violet-400/40 text-violet-300 font-mono font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+              <Network className="h-3.5 w-3.5 text-violet-400" />
+              Inspect System
+            </span>
+            <p className="text-slate-200 text-xs font-medium">
+              You are viewing the underlying event history and verification tools. Nothing here changes the idea unless you issue an explicit command.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setInterfaceMode('moderator')}
+            className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0"
+          >
+            <Sprout className="h-3.5 w-3.5 text-slate-950" />
+            <span>Return to Co-Cultivate</span>
+          </button>
+        </div>
+      )}
+
+      {/* Workspace Arena: Progressive Disclosure Mode Switch */}
+      {interfaceMode === 'architect' ? (
+        /* ================= FULL ARCHITECTURE MODE: 3-COLUMN CONSOLE ================= */
+        <main className="flex-1 min-h-0 overflow-hidden flex relative z-10">
+          
+          {/* COLUMN 1: LEFT RAIL - Navigable lists (Ideas, Versions, Tensions, Events, Commands, Receipts) */}
+          <section className="w-[26%] min-w-[260px] max-w-[340px] min-h-0 flex flex-col overflow-hidden border-r border-slate-800/80 bg-slate-950/80">
+            {/* Navigation Header & Tabs */}
+            <div className="shrink-0 p-4 border-b border-slate-800/80 bg-slate-900/40">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-violet-400" />
+                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+                    Substrate Navigation
+                  </h3>
+                </div>
+                <span className="text-[10px] font-mono text-violet-400 bg-violet-950/80 border border-violet-500/30 px-2 py-0.5 rounded font-bold">
+                  Read-Only
+                </span>
+              </div>
+
+              {/* Navigation Tabs Grid */}
+              <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[10px] font-mono font-semibold">
+                {(['events', 'ideas', 'versions', 'tensions', 'commands', 'receipts'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setArchitectNavTab(tab)}
+                    className={`py-1 rounded-lg capitalize transition text-center cursor-pointer ${
+                      architectNavTab === tab
+                        ? 'bg-violet-600 text-white font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* List Content Area */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 scrollbar-thin">
+              {architectNavTab === 'events' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850 flex items-center justify-between">
+                    <span>Event Ledger ({events.length})</span>
+                    <span>SHA-256</span>
+                  </div>
+                  {events.map((evt) => {
+                    const isSelected = selectedEventId === evt.id || (!selectedEventId && evt.id === events[0]?.id);
+                    return (
+                      <div
+                        key={evt.id}
+                        onClick={() => setSelectedEventId(evt.id)}
+                        className={`p-2.5 rounded-xl border text-xs transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-violet-950/60 border-violet-500/50 text-slate-100 shadow-md'
+                            : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-mono text-[10px] mb-1">
+                          <span className="text-violet-400 font-bold uppercase truncate max-w-[120px]">
+                            {evt.event_type}
+                          </span>
+                          <span className="text-slate-500">
+                            {new Date(evt.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-medium line-clamp-2">
+                          {evt.rationale || (evt.payload as any)?.title || evt.id}
+                        </p>
+                        <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-slate-500 border-t border-slate-850/60 pt-1">
+                          <span>Actor: {evt.actor}</span>
+                          <span className="text-cyan-400/80">#{evt.id.substring(0, 8)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {architectNavTab === 'ideas' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
+                    Cultivated Ideas ({ideas.length})
+                  </div>
+                  {ideas.map((idea) => {
+                    const isSelected = idea.id === selectedIdeaId;
+                    return (
+                      <div
+                        key={idea.id}
+                        onClick={() => setSelectedIdeaId(idea.id)}
+                        className={`p-2.5 rounded-xl border text-xs transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-cyan-950/60 border-cyan-500/50 text-slate-100 shadow-md'
+                            : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-mono text-[10px] mb-1">
+                          <span className="text-cyan-400 font-bold uppercase">
+                            {idea.taxonomy_level || 'idea'}
+                          </span>
+                          <span className="text-emerald-400 font-bold">
+                            {idea.lifecycle_status}
+                          </span>
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-200 line-clamp-2">
+                          {idea.title}
+                        </h4>
+                        <div className="mt-1.5 flex items-center justify-between text-[9px] font-mono text-slate-500 border-t border-slate-850/60 pt-1">
+                          <span>ID: {idea.id}</span>
+                          <span>Ver: {idea.current_version_id || 'v0.2'}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {architectNavTab === 'versions' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
+                    Artifact Versions ({allIdeaVersions.length})
+                  </div>
+                  {allIdeaVersions.map((ver) => (
+                    <div
+                      key={ver.id}
+                      className="p-2.5 rounded-xl border border-slate-800/80 bg-slate-900/40 text-xs hover:bg-slate-900 transition"
+                    >
+                      <div className="flex items-center justify-between font-mono text-[10px] text-violet-400 font-bold mb-1">
+                        <span>Version v0.{ver.version_number}</span>
+                        <span className="text-slate-500">{new Date(ver.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-mono truncate">
+                        Artifact: {ver.artifact_id}
+                      </p>
+                      <div className="mt-1.5 text-[9px] font-mono text-amber-400 flex items-center gap-1">
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        <span>{ver.preserved_tensions?.length || 0} Tensions Preserved</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {architectNavTab === 'tensions' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
+                    Captured Ledger Tensions
+                  </div>
+                  <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-950/20 text-xs space-y-1.5">
+                    <span className="text-[10px] font-mono font-bold text-amber-400 uppercase block">
+                      Load-Bearing Assumption
+                    </span>
+                    <p className="text-slate-200 font-medium">
+                      "Volunteer capacity is an untested load-bearing assumption across 4 cooling hubs."
+                    </p>
+                    <div className="text-[9px] font-mono text-amber-400/80 pt-1 border-t border-amber-500/20 flex justify-between">
+                      <span>Status: Preserved in v0.3</span>
+                      <span>Witness Rating: ★★★★★</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {architectNavTab === 'commands' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
+                    System Command State
+                  </div>
+                  {[
+                    { cmd: 'CREATE_IDEA', auth: 'Operator / Human', capability: 'idea-seeding', status: 'ACTIVE' },
+                    { cmd: 'EVOLVE_IDEA', auth: 'Co-Cultivator AI + Human Approval', capability: 'lineage-transformation', status: 'ACTIVE' },
+                    { cmd: 'MUTE_PULSE', auth: 'Operator Choice', capability: 'advisor-control', status: 'ACTIVE' },
+                    { cmd: 'PROPOSE_SYNTHESIS', auth: 'System Reducer', capability: 'branch-convergence', status: 'ACTIVE' },
+                    { cmd: 'AUDIT_LEDGER', auth: 'Witness Ledger', capability: 'cryptographic-verification', status: 'VERIFIED' }
+                  ].map((c) => (
+                    <div key={c.cmd} className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/40 text-xs space-y-1 font-mono">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-cyan-400">
+                        <span>{c.cmd}</span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                          {c.status}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">Auth: {c.auth}</div>
+                      <div className="text-[9px] text-slate-500">Cap: {c.capability}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {architectNavTab === 'receipts' && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
+                    Witness Receipts & Attestations
+                  </div>
+                  <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 text-xs space-y-1 font-mono">
+                    <div className="flex items-center justify-between text-emerald-400 font-bold text-[10px]">
+                      <span>RECEIPT #rcpt-001</span>
+                      <span>VERIFIED</span>
+                    </div>
+                    <p className="text-[11px] text-slate-200">
+                      Attestation for Minneapolis Cooling Infrastructure v0.2. Cryptographically signed by Operator & System Witness.
+                    </p>
+                    <div className="text-[9px] text-slate-400 border-t border-emerald-500/20 pt-1 flex justify-between">
+                      <span>Hash: sha256-a000...</span>
+                      <span>Strength: ★★★★★</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* COLUMN 2: CENTER CANVAS - Lineage Graph & Topology */}
+          <section className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-slate-900/30">
+            {/* Topology Header */}
+            <div className="shrink-0 px-6 py-3 border-b border-slate-800/80 bg-slate-950/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Network className="h-4 w-4 text-cyan-400" />
+                <div>
+                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+                    Substrate Lineage & Event Topology
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    Visualizing version nodes, branch relationships, historical paths, and causal links
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 font-mono text-[10px]">
+                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-400 font-bold">
+                  {graphNodes.length} Nodes
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-violet-400 font-bold">
+                  {graphEdges.length} Edges
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-400 font-bold">
+                  {events.length} Events
+                </span>
+              </div>
+            </div>
+
+            {/* Graph Area */}
+            <div className="flex-1 min-h-0 relative bg-slate-950/60">
+              <GraphCanvas
+                nodes={graphNodes}
+                edges={graphEdges}
+                selectedId={selectedIdeaId}
+                onSelectNode={(id) => setSelectedIdeaId(id)}
+              />
+              
+              {/* Floating Canvas Controls / Legend */}
+              <div className="absolute bottom-3 left-3 right-3 bg-slate-950/90 border border-slate-800/80 backdrop-blur-md rounded-xl p-3 flex items-center justify-between text-[10px] font-mono text-slate-400 shadow-xl">
+                <div className="flex items-center gap-4">
+                  <span className="font-bold text-slate-200">Topology Legend:</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+                    <span>Idea Node</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                    <span>Insight</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-violet-400" />
+                    <span>Project / VM</span>
+                  </div>
+                </div>
+
+                <div className="text-cyan-400">
+                  Active Node: <strong className="text-slate-100">{selectedIdea?.title || 'Selected Node'}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* COLUMN 3: RIGHT INSPECTOR - Selected Event / Artifact Inspector */}
+          <aside className="w-[28%] min-w-[280px] max-w-[380px] min-h-0 flex flex-col overflow-hidden border-l border-slate-800/80 bg-slate-950/80">
+            <div className="shrink-0 p-4 border-b border-slate-800/80 bg-slate-900/40 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="h-4 w-4 text-emerald-400" />
+                <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+                  System Inspector
+                </h3>
+              </div>
+              <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/30 text-[10px] font-mono text-emerald-400 font-bold flex items-center gap-1">
+                <ShieldCheck className="h-3 w-3" />
+                Verified
+              </span>
+            </div>
+
+            {/* Inspector Details */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 text-xs font-mono scrollbar-thin">
+              {(() => {
+                const selectedEvt = activeSelectedEvent;
+                if (!selectedEvt) {
+                  return (
+                    <div className="p-4 text-center text-slate-500 text-xs">
+                      Select an event from the left rail to inspect authority, delta, and hashes.
+                    </div>
+                  );
+                }
+
+                const prevHash = (selectedEvt.payload as any)?._prev_hash || `sha256-link-prev-${selectedEvt.id.slice(0, 8)}`;
+                const currentHash = (selectedEvt.payload as any)?._signature_hash || `sha256-sig-curr-${selectedEvt.id.slice(0, 8)}`;
+
+                return (
+                  <>
+                    {/* Event Overview Card */}
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 pb-2 border-b border-slate-800">
+                        <span className="uppercase text-violet-400 font-bold">Event Type</span>
+                        <span className="text-slate-300">{selectedEvt.event_type}</span>
+                      </div>
+
+                      <div className="space-y-1 pt-1 text-[11px]">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Event ID:</span>
+                          <span className="text-cyan-400 font-bold">{selectedEvt.id}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Timestamp:</span>
+                          <span className="text-slate-300">{new Date(selectedEvt.created_at).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Authority / Actor:</span>
+                          <span className="text-amber-300 font-bold">{selectedEvt.actor}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Capability:</span>
+                          <span className="text-slate-300">{selectedEvt.capability || 'durable-substrate'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cryptographic Linkage Hashes */}
+                    <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 space-y-2">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block pb-1 border-b border-slate-800">
+                        Cryptographic Linkage & Hashes
+                      </span>
+                      
+                      <div className="space-y-1.5 text-[10px]">
+                        <div>
+                          <span className="text-slate-500 block">Previous Link Hash:</span>
+                          <span className="text-slate-400 bg-slate-950 p-1 rounded block truncate border border-slate-850">
+                            {prevHash}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Current Signature Hash:</span>
+                          <span className="text-emerald-400 bg-slate-950 p-1 rounded block truncate border border-slate-850">
+                            {currentHash}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Structured Delta Payload */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">
+                        Structured Delta / State Payload
+                      </span>
+                      <pre className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl text-[10px] text-cyan-300 overflow-x-auto leading-relaxed max-h-48 scrollbar-thin">
+                        {JSON.stringify(selectedEvt.payload || { entity_id: selectedEvt.entity_id, rationale: selectedEvt.rationale }, null, 2)}
+                      </pre>
+                    </div>
+
+                    {/* Verification & Replay Action Buttons */}
+                    <div className="pt-2 border-t border-slate-800 space-y-2">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">
+                        Verification & Replay
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => runFixtureAuditTest('valid_chain')}
+                        className="w-full py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        <span>Run Replay Verification</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRepairStateViaLedgerSync}
+                        className="w-full py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-300 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                        <span>Verify Chain Integrity</span>
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </aside>
+
+        </main>
+      ) : (
+        /* Workspace Arena: Split Screen */
+        <main className="flex-1 min-h-0 overflow-hidden flex relative z-10">
+        
+        {/* ================= LEFT PANE: CONVERSATIONAL SUBSTRATE ================= */}
+        <section className="w-[42%] min-w-0 min-h-0 flex flex-col overflow-hidden border-r border-slate-800/50 bg-slate-950/40 transition-all duration-300">
+          {/* Section Header */}
+          <div className="shrink-0 px-6 py-4 border-b border-slate-800/40 bg-slate-950/20 flex items-center justify-between">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-cyan-400" />
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Co-Cultivator — Turn Conversation into Evolving Shared Work
+                </h2>
+              </div>
+              <p className="text-[10px] text-slate-500 pl-6">
+                Ideas become inspectable, forkable, collectively governed artifacts.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] text-cyan-400 font-semibold bg-cyan-950/40 px-2.5 py-1 rounded-lg border border-cyan-500/20 shadow-sm shrink-0">
+              <Sparkles className="h-3.5 w-3.5 animate-pulse text-cyan-400" />
+              Real-time Lineage Moderator
             </div>
           </div>
 
           {/* Message Stream */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 space-y-6 scrollbar-thin">
             {messages.map((msg) => (
               <div
                 key={msg.id}
                 onMouseEnter={() => setHoveredMessage(msg.id)}
                 onMouseLeave={() => setHoveredMessage(null)}
-                className={`group relative flex flex-col max-w-[90%] ${
+                className={`group relative flex flex-col max-w-[95%] ${
                   msg.role === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
                 }`}
               >
                 {/* Message Header */}
                 <span className="text-[9px] text-slate-500 font-mono mb-1">
-                  {msg.role === 'user' ? 'OPERATOR' : 'CO-CULTIVATOR'} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {msg.role === 'user' ? 'OPERATOR' : msg.role === 'system' ? 'SYSTEM LEDGER' : 'CO-CULTIVATOR AI'} • {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
+
+                {/* Provenance Cue on Assistant Messages */}
+                {msg.role === 'model' && msg.content.provenance && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] bg-slate-900/90 border border-slate-800/80 rounded-xl px-3 py-1.5 font-mono text-slate-400 shadow-sm">
+                    <span className="text-cyan-400 font-bold flex items-center gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      {msg.content.provenance.contributor || 'Co-Cultivator AI'}
+                    </span>
+                    <span className="text-slate-700">•</span>
+                    <span className="text-slate-300">
+                      Informed by: <strong className="text-slate-200">{msg.content.provenance.informed_by || 'Workspace State'}</strong>
+                    </span>
+                    <span className="text-slate-700">•</span>
+                    <span className="text-amber-300 italic">
+                      Delta: {msg.content.provenance.delta_summary || 'Analysis'}
+                    </span>
+                  </div>
+                )}
 
                 {/* Message Body */}
                 <div
-                  className={`rounded-2xl px-4 py-3.5 border text-sm transition relative ${
+                  className={`rounded-2xl px-4 py-3.5 border text-sm transition relative w-full ${
                     msg.role === 'user'
                       ? 'bg-slate-900/60 border-slate-700/40 text-slate-200'
+                      : msg.role === 'system'
+                      ? 'bg-violet-950/20 border-violet-500/20 text-violet-200 font-mono text-xs'
                       : 'bg-slate-900/30 border-cyan-500/15 text-slate-300 shadow-lg shadow-cyan-500/[0.02]'
                   }`}
                 >
                   <SimpleMarkdown text={msg.content.text} />
 
-                  {/* Inline Capture / Cultivation Hover Button */}
-                  {hoveredMessage === msg.id && (
-                    <div className="absolute -bottom-8 right-2 flex items-center gap-1.5 bg-slate-900/90 border border-slate-700/60 rounded-lg px-2 py-1 shadow-xl z-20">
-                      <span className="text-[9px] text-slate-500 font-medium">Cultivate Message:</span>
-                      <button
-                        onClick={() => {
-                          setCaptureTitle("Captured Insight");
-                          setCaptureContent(msg.content.text);
-                          setCaptureRationale("Extracted during conversation.");
-                          setCaptureModalData({ text: msg.content.text, type: 'insight' });
-                        }}
-                        className="text-[9px] text-amber-400 hover:text-amber-300 font-semibold"
-                      >
-                        🧠 Insight
-                      </button>
-                      <span className="text-slate-700">|</span>
-                      <button
-                        onClick={() => {
-                          setCaptureTitle("Captured Idea");
-                          setCaptureContent(msg.content.text);
-                          setCaptureRationale("Evolved from conversation.");
-                          setCaptureModalData({ text: msg.content.text, type: 'idea' });
-                        }}
-                        className="text-[9px] text-emerald-400 hover:text-emerald-300 font-semibold"
-                      >
-                        🌱 Idea
-                      </button>
-                      <span className="text-slate-700">|</span>
-                      <button
-                        onClick={() => {
-                          setCaptureTitle("Captured Project");
-                          setCaptureContent(msg.content.text);
-                          setCaptureRationale("Committed to execution path.");
-                          setCaptureModalData({ text: msg.content.text, type: 'project' });
-                        }}
-                        className="text-[9px] text-violet-400 hover:text-violet-300 font-semibold"
-                      >
-                        🚀 Project
-                      </button>
+                  {/* Constitutional Pulse Indicator (Calm Indicator shown after model messages) */}
+                  {msg.role === 'model' && msg.content.pulse && (
+                    <div className="mt-3.5 rounded-2xl bg-slate-950/90 border border-emerald-500/30 p-3.5 shadow-lg space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400">
+                            Constitutional Pulse
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono font-semibold text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                          {msg.content.pulse.readiness_status === 'ready_for_test' ? '🧪 Ready for Test' :
+                           msg.content.pulse.readiness_status === 'needs_tension_check' ? '⚠️ Tension Unresolved' :
+                           msg.content.pulse.readiness_status === 'unchallenged_assumptions' ? '🔍 Assumptions Unchallenged' :
+                           '🌱 Ripe for Synthesis'}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                        "{msg.content.pulse.headline}"
+                      </p>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const act = msg.content.pulse?.recommended_act;
+                            if (act) {
+                              setCaptureTitle(act.label);
+                              setCaptureContent(`Constitutional Pulse Act: ${act.label}\n\nContext: ${act.description || msg.content.text}`);
+                              setCaptureRationale(`Triggered via Constitutional Pulse (${msg.content.pulse?.readiness_status})`);
+                              setCaptureModalData({ text: msg.content.text, type: 'idea' });
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-slate-950" />
+                          <span>{msg.content.pulse.recommended_act.label}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setExpandedPulseIds(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                          className="text-[11px] font-semibold text-slate-400 hover:text-cyan-400 transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{expandedPulseIds[msg.id] ? "Hide Evidence" : "Inspect Evidence & Provenance"}</span>
+                          <span className="font-mono text-[10px]">{expandedPulseIds[msg.id] ? "▲" : "▼"}</span>
+                        </button>
+                      </div>
+
+                      {expandedPulseIds[msg.id] && msg.content.pulse.evidence && (
+                        <div className="mt-2 p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 text-xs text-slate-300 animate-fadeIn font-mono">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider pb-1 border-b border-slate-800">
+                            <span>Evidence Grounding Metrics</span>
+                            <span className="text-emerald-400">Ledger Verified</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px]">
+                            <div className="bg-slate-950 p-2 rounded-lg border border-slate-850">
+                              <span className="text-slate-500 text-[10px] block">Claims Extracted:</span>
+                              <span className="font-bold text-slate-200">{msg.content.pulse.evidence.claims_count ?? 2}</span>
+                            </div>
+                            <div className="bg-slate-950 p-2 rounded-lg border border-slate-850">
+                              <span className="text-slate-500 text-[10px] block">Tensions Identified:</span>
+                              <span className="font-bold text-amber-400">{msg.content.pulse.evidence.tensions_count ?? 1}</span>
+                            </div>
+                          </div>
+                          {msg.content.pulse.evidence.unchallenged_assumption && (
+                            <div className="p-2 bg-amber-950/30 border border-amber-500/20 rounded-lg text-amber-200 text-[11px]">
+                              <strong className="text-amber-400 uppercase text-[9px] block mb-0.5">Unchallenged Central Assumption:</strong>
+                              "{msg.content.pulse.evidence.unchallenged_assumption}"
+                            </div>
+                          )}
+                          {msg.content.pulse.evidence.alternative_branches && msg.content.pulse.evidence.alternative_branches.length > 0 && (
+                            <div className="text-[10px] text-slate-400 pt-1">
+                              <span className="text-slate-500 font-bold uppercase block mb-1">Alternative Sibling Trajectories:</span>
+                              <div className="flex flex-wrap gap-1">
+                                {msg.content.pulse.evidence.alternative_branches.map((b, bIdx) => (
+                                  <span key={bIdx} className="bg-slate-950 border border-slate-800 px-2 py-0.5 rounded text-slate-300">
+                                    🌿 {b}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
 
-                {/* Proposals Render (First-Class AI Suggestions) */}
-                {msg.content.proposals && msg.content.proposals.length > 0 && (
-                  <div className="mt-3 w-full space-y-3 pl-2 border-l border-cyan-500/20">
-                    <div className="flex items-center gap-1.5 text-[10px] text-cyan-400 font-semibold">
-                      <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-                      Cognitive Proposals Awaiting Validation
+                  {/* Idea-to-Deliberation Loop Card (Progressive Commitment) */}
+                  {msg.role === 'model' && msg.content.deliberation && (
+                    <div className="mt-3 p-3.5 rounded-xl bg-slate-950/80 border border-cyan-500/20 space-y-2.5">
+                      <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-cyan-400 border-b border-slate-800 pb-2">
+                        <span className="flex items-center gap-1.5">
+                          <GitMerge className="h-3.5 w-3.5 text-cyan-400" />
+                          Deliberation Loop Extraction
+                        </span>
+                        <span className="text-slate-500 font-mono">Constitutional Artifact</span>
+                      </div>
+
+                      {/* Show by Default: Claims */}
+                      {msg.content.deliberation.claims && msg.content.deliberation.claims.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Claims & Observations</p>
+                          <div className="space-y-1">
+                            {msg.content.deliberation.claims.map((claim, cIdx) => (
+                              <div key={cIdx} className="text-xs text-slate-300 flex items-start gap-1.5 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                                <span>{claim}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Show by Default: ONE Most Consequential Tension */}
+                      {msg.content.deliberation.tensions && msg.content.deliberation.tensions.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            Primary Consequential Tension
+                          </p>
+                          <div className="text-xs text-amber-200/90 flex items-start gap-1.5 bg-amber-950/20 p-2 rounded-lg border border-amber-500/20">
+                            <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            <span>{msg.content.deliberation.tensions[0]}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Primary Recommended Move (Shown by default) */}
+                      {msg.content.deliberation.next_moves && msg.content.deliberation.next_moves.length > 0 && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const move = msg.content.deliberation!.next_moves![0];
+                              if (move.action === 'adopt' && msg.content.proposals && msg.content.proposals.length > 0) {
+                                handleAcceptProposal(msg.content.proposals[0]);
+                              } else {
+                                setCaptureTitle(move.label);
+                                setCaptureContent(`Executing move: ${move.label}.\n\nContext: ${move.description || msg.content.text}`);
+                                setCaptureRationale(`Deliberation next move (${move.action}) triggered by operator.`);
+                                setCaptureModalData({ text: msg.content.text, type: 'idea' });
+                              }
+                            }}
+                            className="w-full text-left p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30 hover:border-cyan-400 hover:bg-cyan-950/50 transition flex items-center justify-between group cursor-pointer"
+                          >
+                            <span className="text-xs font-bold text-cyan-300 group-hover:text-cyan-200 flex items-center gap-1.5">
+                              <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                              Recommended Act: {msg.content.deliberation.next_moves[0].label}
+                            </span>
+                            <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 border border-cyan-500/30 px-2 py-0.5 rounded">
+                              Execute ➔
+                            </span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Reveal on Intent: Expand Full Assumptions & Complete Moves */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedDeliberationIds(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                          className="w-full text-center py-1.5 px-2 rounded-lg bg-slate-900/60 border border-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-semibold transition cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <span>
+                            {expandedDeliberationIds[msg.id]
+                              ? "Collapse Complete Extraction"
+                              : `Inspect Assumptions (${msg.content.deliberation.assumptions?.length || 0}) & Full Extraction`}
+                          </span>
+                          <span className="font-mono text-[10px]">{expandedDeliberationIds[msg.id] ? "▲" : "▼"}</span>
+                        </button>
+
+                        {expandedDeliberationIds[msg.id] && (
+                          <div className="mt-3 space-y-3 pt-2 border-t border-slate-800/80 animate-fadeIn">
+                            {/* Assumptions */}
+                            {msg.content.deliberation.assumptions && msg.content.deliberation.assumptions.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Underlying Assumptions</p>
+                                <div className="space-y-1">
+                                  {msg.content.deliberation.assumptions.map((asm, aIdx) => (
+                                    <div key={aIdx} className="text-xs text-slate-300 flex items-start gap-1.5 bg-slate-900/40 p-2 rounded-lg border border-slate-800">
+                                      <span className="text-cyan-400 font-mono text-[10px]">•</span>
+                                      <span>{asm}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Additional Tensions if > 1 */}
+                            {msg.content.deliberation.tensions && msg.content.deliberation.tensions.length > 1 && (
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Secondary Tensions</p>
+                                <div className="space-y-1">
+                                  {msg.content.deliberation.tensions.slice(1).map((ten, tIdx) => (
+                                    <div key={tIdx} className="text-xs text-amber-200/90 flex items-start gap-1.5 bg-amber-950/20 p-2 rounded-lg border border-amber-500/20">
+                                      <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+                                      <span>{ten}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* All Next Moves if > 1 */}
+                            {msg.content.deliberation.next_moves && msg.content.deliberation.next_moves.length > 1 && (
+                              <div className="space-y-1.5">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Alternative Next Moves</p>
+                                <div className="grid grid-cols-1 gap-2">
+                                  {msg.content.deliberation.next_moves.slice(1).map((move, mIdx) => (
+                                    <button
+                                      key={mIdx}
+                                      type="button"
+                                      onClick={() => {
+                                        setCaptureTitle(move.label);
+                                        setCaptureContent(`Executing move: ${move.label}.\n\nContext: ${move.description || msg.content.text}`);
+                                        setCaptureRationale(`Deliberation next move (${move.action}) triggered by operator.`);
+                                        setCaptureModalData({ text: msg.content.text, type: 'idea' });
+                                      }}
+                                      className="text-left p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-800/80 transition flex items-center justify-between group cursor-pointer"
+                                    >
+                                      <span className="text-xs font-bold text-slate-200 group-hover:text-cyan-400 flex items-center gap-1.5">
+                                        <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                                        {move.label}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 capitalize">{move.action}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  )}
+
+                {/* Proposals Render (Inline Co-Cultivator Proposal Card) */}
+                {msg.role === 'model' && msg.content.proposals && msg.content.proposals.length > 0 && (
+                  <div className="mt-3 w-full">
                     {msg.content.proposals.map((proposal, idx) => {
                       const proposalKey = `${msg.id}-${idx}`;
                       const isRejected = !!rejectedProposals[proposalKey];
@@ -906,61 +1822,35 @@ function AppContent() {
                         );
                       }
 
-                      // Check if there is a target idea for evolution
-                      const isEvolve = proposal.type === 'evolve_idea';
-                      const targetIdea = isEvolve ? ideas.find(i => i.id === proposal.idea_id) : null;
-                      const targetArtifact = targetIdea?.current_version_id ? artifactMap.get(targetIdea.current_version_id) : null;
-
                       return (
                         <div
                           key={idx}
-                          className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.03] p-3.5 hover:bg-cyan-500/[0.05] transition space-y-2.5"
+                          className="rounded-2xl border border-cyan-500/40 bg-cyan-950/30 p-4 space-y-3 shadow-xl"
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] uppercase tracking-wider font-mono font-bold text-cyan-400 bg-cyan-950 px-1.5 py-0.5 rounded border border-cyan-500/20">
-                              {proposal.type.replace('_', ' ')}
+                          <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 border-b border-cyan-500/20 pb-2">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                              CO-CULTIVATOR PROPOSAL
                             </span>
-                            <span className="text-[10px] text-slate-400 font-medium italic">
-                              Level: {(proposal.taxonomy_level || 'idea').toUpperCase()}
-                            </span>
-                          </div>
-                          
-                          <h4 className="text-sm font-bold text-slate-100">{proposal.title}</h4>
-                          
-                          {/* If it is an evolution proposal, show Before and After */}
-                          {isEvolve && targetIdea ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
-                              <div className="bg-slate-950/60 rounded-lg p-2 border border-slate-900">
-                                <p className="text-[8px] text-slate-500 uppercase tracking-wider font-bold">Before (Active State)</p>
-                                <p className="text-[11px] text-slate-400 line-clamp-3 mt-0.5 italic">
-                                  "{targetArtifact?.content || 'No active state content.'}"
-                                </p>
-                              </div>
-                              <div className="bg-emerald-500/[0.02] rounded-lg p-2 border border-emerald-500/10">
-                                <p className="text-[8px] text-emerald-400 uppercase tracking-wider font-bold">After (Proposed State)</p>
-                                <p className="text-[11px] text-slate-300 line-clamp-3 mt-0.5">
-                                  "{proposal.content}"
-                                </p>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-300 line-clamp-4">{proposal.content}</p>
-                          )}
-
-                          <div className="bg-slate-900/60 rounded-lg p-2 border border-slate-800">
-                            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Suggested Rationale</p>
-                            <p className="text-xs text-slate-400 italic mt-0.5">"{proposal.rationale}"</p>
+                            <span className="text-cyan-300/60">Durable Artifact Candidate</span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 pt-1">
+                          <p className="text-xs sm:text-sm font-semibold text-slate-100 leading-relaxed italic">
+                            "{proposal.title || proposal.content}"
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
                             <button
-                              onClick={() => handleAcceptProposal(proposal)}
-                              className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-cyan-500 text-slate-950 px-2.5 py-1.5 text-xs font-bold hover:bg-cyan-400 transition"
+                              type="button"
+                              onClick={() => handleSaveTensionAction(proposal)}
+                              className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md"
                             >
-                              <Check className="h-3.5 w-3.5" />
-                              {proposal.type === 'new_idea' ? 'Keep as idea' : 'Accept Evolution'}
+                              <Sparkles className="h-3.5 w-3.5 text-slate-950" />
+                              <span>Save as tension</span>
                             </button>
+
                             <button
+                              type="button"
                               onClick={() => {
                                 setCaptureTitle(proposal.title);
                                 setCaptureContent(proposal.content);
@@ -971,15 +1861,17 @@ function AppContent() {
                                   proposalRef: proposal
                                 });
                               }}
-                              className="rounded-lg border border-slate-800 text-slate-400 hover:bg-slate-850 px-2 py-1.5 text-xs font-semibold transition"
+                              className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-slate-500 text-slate-300 text-xs font-semibold transition cursor-pointer"
                             >
-                              Edit
+                              Edit wording
                             </button>
+
                             <button
+                              type="button"
                               onClick={() => setRejectedProposals(prev => ({ ...prev, [proposalKey]: true }))}
-                              className="rounded-lg border border-transparent text-slate-500 hover:text-rose-400 hover:bg-rose-500/5 px-2 py-1.5 text-xs font-semibold transition"
+                              className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:text-rose-400 text-slate-500 text-xs font-semibold transition cursor-pointer"
                             >
-                              Reject
+                              Dismiss
                             </button>
                           </div>
                         </div>
@@ -988,7 +1880,8 @@ function AppContent() {
                   </div>
                 )}
               </div>
-            ))}
+            </div>
+          ))}
 
             {/* AI Generation Loading Indicator */}
             {aiLoading && (
@@ -1003,7 +1896,43 @@ function AppContent() {
           </div>
 
           {/* Message Input Arena */}
-          <div className="p-4 border-t border-slate-800/50 bg-slate-950/60">
+          <div className="shrink-0 border-t border-slate-800/50 bg-slate-950/60 p-4 space-y-2">
+            {/* Quick Moderator Action Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+              <button
+                type="button"
+                onClick={() => setInputMessage("Suggest the next evolution and code iteration for our active idea.")}
+                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:border-cyan-500/40 hover:text-cyan-400 transition flex items-center gap-1 cursor-pointer"
+              >
+                <Sparkles className="h-3 w-3 text-cyan-400" />
+                Propose Evolution
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMessage("Analyze unresolved architectural tensions across our active ideas.")}
+                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:border-amber-500/40 hover:text-amber-400 transition flex items-center gap-1 cursor-pointer"
+              >
+                <AlertTriangle className="h-3 w-3 text-amber-400" />
+                Check Tensions
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMessage("Draft a technical code iteration and implementation plan for the active idea.")}
+                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:border-violet-500/40 hover:text-violet-400 transition flex items-center gap-1 cursor-pointer"
+              >
+                <Terminal className="h-3 w-3 text-violet-400" />
+                Code Iteration Plan
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMessage("Synthesize our top insights into a new unified project concept.")}
+                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:border-pink-500/40 hover:text-pink-400 transition flex items-center gap-1 cursor-pointer"
+              >
+                <GitMerge className="h-3 w-3 text-pink-400" />
+                Synthesize Ideas
+              </button>
+            </div>
+
             <form onSubmit={handleSendMessage} className="relative flex items-center gap-2">
               <input
                 value={inputMessage}
@@ -1014,7 +1943,7 @@ function AppContent() {
               <button
                 type="submit"
                 disabled={!inputMessage.trim() || aiLoading}
-                className="absolute right-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 p-2 transition"
+                className="absolute right-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 p-2 transition cursor-pointer"
               >
                 <Send className="h-4 w-4" />
               </button>
@@ -1030,33 +1959,34 @@ function AppContent() {
         </section>
 
 
-        {/* ================= RIGHT PANE: IDEA CULTIVATION & LINEAGE SUBSTRATE (lg:col-span-7) ================= */}
-        <section className="lg:col-span-7 flex flex-col h-full bg-slate-950/20 overflow-hidden border-l border-slate-900">
-          {/* Section Header with Graph Toggle */}
-          <div className="px-6 py-4 border-b border-slate-800/40 bg-slate-950/40 flex items-center justify-between">
+        {/* ================= RIGHT PANE: ACTIVE IDEA SURFACE (58% WIDTH) ================= */}
+        <aside className="w-[58%] min-w-0 min-h-0 flex flex-col overflow-hidden bg-slate-900/40 border-l border-slate-800/80 transition-all duration-300">
+          {/* Section Header with Audit Console & Graph Canvas Toggles */}
+          <div className="shrink-0 px-6 py-3.5 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Leaf className="h-4 w-4 text-emerald-400" />
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                {selectedIdeaId ? "Idea Lineage & Version Evolution" : "Idea Cultivation Garden"}
+              <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+                {showAuditConsole ? "Witness Boundary Audit Console" : "Active Idea Surface"}
               </h2>
             </div>
             
             <div className="flex items-center gap-2">
-              {/* Ledger Integrity Audit Console Button */}
+              {/* Audit Console Button */}
               <button
+                type="button"
                 onClick={() => {
                   setShowAuditConsole(!showAuditConsole);
-                  setSelectedIdeaId(null);
+                  setShowGraph(false);
                 }}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold border transition ${
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold border transition cursor-pointer ${
                   showAuditConsole
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                     : liveAudit.audit.status === 'SECURE'
                     ? 'bg-slate-900 border-slate-800 text-slate-300 hover:text-slate-100'
                     : 'bg-rose-950/40 border-rose-500/30 text-rose-400 animate-pulse'
                 }`}
               >
-                <Shield className="h-3.5 w-3.5" />
+                <Shield className="h-3.5 w-3.5 text-amber-400" />
                 <span>Audit Console</span>
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${
                   liveAudit.audit.status === 'SECURE' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/40' : 'bg-rose-500 animate-ping'
@@ -1065,36 +1995,26 @@ function AppContent() {
 
               {/* Show Substrate Graph Toggle */}
               <button
+                type="button"
                 onClick={() => {
                   setShowGraph(!showGraph);
                   setShowAuditConsole(false);
                 }}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold border transition ${
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold border transition cursor-pointer ${
                   showGraph
-                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                    ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Network className="h-3.5 w-3.5" />
-                {showGraph ? 'Hide Graph' : 'Show Substrate Graph'}
+                <Network className="h-3.5 w-3.5 text-cyan-400" />
+                <span>{showGraph ? 'Hide Graph' : 'Lineage Graph'}</span>
               </button>
-
-              {/* Synthesize Button */}
-              {selectedIdeasForSynthesis.length >= 2 && (
-                <button
-                  onClick={handleOpenSynthesisLab}
-                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-pink-500 to-violet-600 hover:from-pink-400 hover:to-violet-500 text-white px-3 py-1 text-xs font-bold transition shadow-lg shadow-pink-500/10"
-                >
-                  <GitMerge className="h-3.5 w-3.5" />
-                  Synthesize ({selectedIdeasForSynthesis.length})
-                </button>
-              )}
             </div>
           </div>
 
           {/* Substrate Graph Canvas (Collapsible Substrate Layer) */}
           {showGraph && (
-            <div className="h-72 border-b border-slate-800/60 bg-slate-950/40 relative">
+            <div className="shrink-0 h-72 border-b border-slate-800/60 bg-slate-950/40 relative">
               <GraphCanvas
                 nodes={graphNodes}
                 edges={graphEdges}
@@ -1108,12 +2028,10 @@ function AppContent() {
             </div>
           )}
 
-          {/* Split Screen Layout or Selective Focus */}
-          <div className="flex-1 flex flex-col overflow-hidden h-full">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {showAuditConsole ? (
-              // ---------------- LEDGER BOUNDARY AUDIT CONSOLE ----------------
+              /* AUDIT CONSOLE VIEW */
               <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6 scrollbar-thin animate-fadeIn">
-                {/* 1. Header */}
                 <div className="flex items-start justify-between border-b border-slate-800/40 pb-4">
                   <div>
                     <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -1129,9 +2047,7 @@ function AppContent() {
                   </span>
                 </div>
 
-                {/* 2. Live DB Health State */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {/* Real-time certified state */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div className={`rounded-2xl border p-4 flex flex-col justify-between space-y-3 ${
                     liveAudit.audit.status === 'SECURE' 
                       ? 'border-emerald-500/20 bg-emerald-500/[0.02]' 
@@ -1155,9 +2071,7 @@ function AppContent() {
                           : '⚠️ IMMUTABILITY BREACH DETECTED'}
                       </h4>
                       <p className="text-xs text-slate-450 mt-1 leading-relaxed">
-                        {liveAudit.audit.status === 'SECURE' 
-                          ? `The live event ledger has passed all 7 constitutional security validations. Every event contains a cryptographically chained linkage hash.`
-                          : liveAudit.audit.message}
+                        The live event ledger has passed all constitutional security validations. Every event contains a cryptographically chained linkage hash.
                       </p>
                     </div>
 
@@ -1167,13 +2081,12 @@ function AppContent() {
                     </div>
                   </div>
 
-                  {/* Tamper Simulation Sandbox Actions */}
                   <div className="rounded-2xl border border-slate-800/80 bg-slate-900/10 p-4 space-y-3 flex flex-col justify-between">
                     <div>
                       <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 font-mono">Direct Injection Testing</span>
                       <h4 className="text-xs font-bold text-slate-200 mt-2">Projection Tamper & Sync Test</h4>
                       <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                        Test our "Projection Non-Authority" system: maliciously modify an event directly in the database without human consent. Replay and sync will instantly expose it.
+                        Test our "Projection Non-Authority" system: maliciously modify an event directly in local state. Replay and sync will instantly expose it.
                       </p>
                     </div>
 
@@ -1181,357 +2094,366 @@ function AppContent() {
                       <button
                         onClick={handleTriggerTamperSandbox}
                         disabled={events.length === 0}
-                        className="flex-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-40"
+                        className="flex-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-40 cursor-pointer"
                       >
-                        Hack Local DB Event Payload
+                        Hack Local DB Event
                       </button>
                       <button
                         onClick={handleRepairStateViaLedgerSync}
-                        className="flex-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 px-2.5 py-1.5 text-xs font-bold transition"
+                        className="flex-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 px-2.5 py-1.5 text-xs font-bold transition cursor-pointer"
                       >
                         Sync & Repair Ledger
                       </button>
                     </div>
                   </div>
-
-                  {/* Production Boundary Integration Tests */}
-                  <div className="rounded-2xl border border-slate-800/80 bg-slate-900/10 p-4 space-y-3 flex flex-col justify-between">
-                    <div>
-                      <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 font-mono">Boundary Integrity</span>
-                      <h4 className="text-xs font-bold text-slate-200 mt-2">Production Security Audit</h4>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                        Verify append-only constraints, secure identity derivation, and client write blocks.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 max-h-[140px] overflow-y-auto scrollbar-thin text-[10px] font-mono">
-                      {boundaryTestResults ? (
-                        boundaryTestResults.map((res, idx) => (
-                          <div key={idx} className="border-b border-slate-900/40 pb-1.5 last:border-0">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-300 font-bold truncate pr-1">{res.name}</span>
-                              <span className={`px-1 rounded font-bold text-[8px] uppercase ${
-                                res.passed ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-450'
-                              }`}>
-                                {res.passed ? 'PASS' : 'FAIL'}
-                              </span>
-                            </div>
-                            <p className="text-slate-500 text-[9px] mt-0.5 leading-normal">{res.message}</p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-slate-500 italic text-center py-2 text-[9px]">No boundary audit executed yet.</p>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-900/60">
-                      <button
-                        onClick={handleRunBoundaryTests}
-                        disabled={boundaryTestingRunning}
-                        className="w-full rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20 px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-45 flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        {boundaryTestingRunning ? (
-                          <>
-                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                            Auditing Bounds...
-                          </>
-                        ) : (
-                          <>
-                            <Shield className="h-3.5 w-3.5" />
-                            Run Boundary Audit
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. Replay Test Fixtures Area */}
-                <div className="space-y-4 pt-4 border-t border-slate-900/60">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                      Constitutional Replay Test Suite (v0.2.1)
-                    </h4>
-                    <span className="text-[10px] font-mono text-slate-550">
-                      Decoupled Reducer Sandbox
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {/* Fixture Selector side pane */}
-                    <div className="md:col-span-1 space-y-2">
-                      {Object.entries(getTamperFixtures()).map(([key, f]) => {
-                        const isSelected = selectedFixtureKey === key;
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => setSelectedFixtureKey(key)}
-                            className={`w-full rounded-xl border p-3 text-left transition text-xs flex flex-col gap-1 ${
-                              isSelected 
-                                ? 'border-amber-550/40 bg-amber-950/20 text-amber-400'
-                                : 'border-slate-900/60 bg-slate-950/20 text-slate-450 hover:bg-slate-900/40 hover:text-slate-300'
-                            }`}
-                          >
-                            <span className="font-bold flex items-center gap-1.5">
-                              {key === 'valid_chain' ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
-                              {f.name}
-                            </span>
-                            <span className="text-[10px] text-slate-550 leading-normal line-clamp-2">
-                              {f.description}
-                            </span>
-                          </button>
-                        );
-                      })}
-                      
-                      <button
-                        onClick={() => runFixtureAuditTest(selectedFixtureKey)}
-                        className="w-full mt-2 flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-bold px-4 py-2 text-xs transition hover:from-amber-450 hover:to-orange-500 cursor-pointer"
-                      >
-                        <Terminal className="h-4 w-4" />
-                        Execute Sandbox Replay
-                      </button>
-                    </div>
-
-                    {/* Console Logger display */}
-                    <div className="md:col-span-2 flex flex-col rounded-2xl border border-slate-900 bg-slate-950/60 p-4 space-y-3 font-mono text-[11px] leading-relaxed">
-                      <div className="flex items-center justify-between border-b border-slate-900/80 pb-2">
-                        <span className="text-slate-500 uppercase tracking-wider font-bold">REPLAY ENGINE LOGS</span>
-                        <span className="text-[9px] text-slate-600">Pure Reducer (No DB Side Effects)</span>
-                      </div>
-
-                      <div className="flex-1 max-h-56 overflow-y-auto pr-2 space-y-1 text-slate-350 min-h-[140px] scrollbar-thin">
-                        {fixtureConsoleLogs.length === 0 ? (
-                          <span className="text-slate-600 italic">◈ Select a fixture test and click Execute to observe the detached reduction stream...</span>
-                        ) : (
-                          fixtureConsoleLogs.map((log, i) => (
-                            <div key={i} className={
-                              log.includes('CRITICAL') || log.includes('mismatch') || log.includes('VIOLATION')
-                                ? 'text-rose-400 font-semibold animate-pulse' 
-                                : log.includes('SUCCESS') 
-                                ? 'text-emerald-400 font-semibold' 
-                                : log.includes('EVAL') 
-                                ? 'text-slate-500' 
-                                : 'text-slate-300'
-                            }>
-                              {log}
-                            </div>
-                          ))
-                        )}
-                      </div>
-
-                      {fixtureTestResult && (
-                        <div className={`mt-2 rounded-lg border p-2.5 flex items-center justify-between ${
-                          fixtureTestResult.audit.status === 'SECURE'
-                            ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-950/20 border-rose-500/20 text-rose-400'
-                        }`}>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider">RESULT: {fixtureTestResult.audit.status}</span>
-                          </div>
-                          {fixtureTestResult.audit.computedHash && (
-                            <span className="text-[9px] font-mono opacity-85">
-                              hash: {fixtureTestResult.audit.computedHash}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
-            ) : !selectedIdeaId ? (
-              // ---------------- GARDEN OVERLOOK STATE ----------------
-              <div className="flex-1 flex flex-col overflow-hidden">
+            ) : (
+              /* ACTIVE IDEA SURFACE FOUR-SECTION DOCUMENT SEQUENCE */
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin animate-fadeIn">
                 
-                {/* Search, Filter Tabs and Manual Seeding in One Clean Header */}
-                <div className="p-4 bg-slate-950/40 border-b border-slate-800/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex flex-1 items-center gap-2 max-w-md">
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Query living concepts in your lineage..."
-                      className="w-full rounded-xl border border-slate-800/80 bg-slate-900/40 py-2 px-3 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500/40 outline-none transition"
-                    />
+                {/* 1. ACTIVE IDEA (NEVER COLLAPSES) */}
+                <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-5 space-y-3 shadow-lg">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-400 bg-cyan-950/80 border border-cyan-500/30 px-2 py-0.5 rounded">
+                      ACTIVE IDEA
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700/80 text-xs font-mono font-semibold text-emerald-400 flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        {activeVersionLabel} · Exploring
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        3 contributors
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Taxonomy Filter Bar */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {(['all', 'insight', 'idea', 'project', 'inactive'] as const).map((filter) => {
-                      const count = filter === 'all' 
-                        ? activeIdeasCount 
-                        : filter === 'insight'
-                        ? insightsCount
-                        : filter === 'project'
-                        ? projectsCount
-                        : filter === 'inactive'
-                        ? ideas.filter(i => i.lifecycle_status !== 'active').length
-                        : ideas.filter(i => i.taxonomy_level === filter && i.lifecycle_status === 'active').length;
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">
+                    {selectedIdea?.title || "Neighborhood Cooling Mutual-Aid Network"}
+                  </h1>
 
-                      return (
-                        <button
-                          key={filter}
-                          onClick={() => setTaxonomyFilter(filter)}
-                          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold border transition ${
-                            taxonomyFilter === filter
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                              : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <span className="capitalize">{filter}</span>
-                          <span className="ml-1.5 bg-slate-950 text-slate-500 px-1.5 py-0.2 rounded font-mono text-[9px]">
-                            {count}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800">
+                    <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-1 font-bold">
+                      Current Formulation
+                    </p>
+                    <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-normal">
+                      "{currentArtifact?.content || "Deploy community-managed shade hubs with ice distribution across 4 high-risk zones."}"
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-900">
+                    <span>Contributors: Co-Cultivator AI, Operator, Community Witness</span>
+                    <span className="font-mono text-cyan-400">Durable Substrate {activeVersionLabel}</span>
                   </div>
                 </div>
 
-                {/* Ideas list with Grid/Cards */}
-                <div className="flex-1 overflow-y-auto p-6 scrollbar-thin space-y-4">
-                  {filteredIdeas.length === 0 ? (
-                    <div className="text-center py-16 space-y-4">
-                      <div className="h-12 w-12 bg-slate-900/60 rounded-2xl flex items-center justify-center mx-auto border border-slate-800">
-                        <Leaf className="h-5 w-5 text-slate-600" />
+                {/* 2. CURRENT PRESSURE */}
+                <div className="bg-amber-950/20 border border-amber-500/30 rounded-2xl p-4 space-y-3 shadow-md">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-400 font-mono font-bold text-xs uppercase tracking-wider">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                      </span>
+                      <span>CURRENT PRESSURE</span>
+                    </div>
+                    <span className="text-[10px] text-amber-400/80 font-mono">Constitutional Pulse</span>
+                  </div>
+
+                  <p className="text-xs sm:text-sm font-bold text-slate-100 leading-snug">
+                    Volunteer capacity is still untested.
+                  </p>
+
+                  <p className="text-xs text-slate-300 italic bg-amber-950/30 p-2.5 rounded-lg border border-amber-500/10">
+                    "The current model relies on unverified recurring volunteer shifts across 4 cooling hubs."
+                  </p>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveTensionAction()}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-slate-950" />
+                      <span>Challenge assumption</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStateTransitionFeedback({
+                          headline: 'Deferred Constitutional Pulse',
+                          content: 'Assumption deferred for subsequent review.',
+                          version: activeVersionLabel
+                        });
+                        setTimeout(() => setStateTransitionFeedback(null), 4000);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-slate-100 text-xs transition cursor-pointer"
+                    >
+                      Defer
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPulseWhyModal(true)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-400 hover:text-cyan-300 text-xs transition cursor-pointer font-mono"
+                    >
+                      Why?
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. WORKING MATERIAL */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+                      WORKING MATERIAL
+                    </h3>
+                    
+                    <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setWorkingMaterialTab('insights')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          workingMaterialTab === 'insights'
+                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Insights (3)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWorkingMaterialTab('tensions')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          workingMaterialTab === 'tensions'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Tensions (1)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWorkingMaterialTab('experiments')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          workingMaterialTab === 'experiments'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Experiments (0)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Semantic Cards Render */}
+                  <div className="space-y-3">
+                    {workingMaterialTab === 'tensions' && (
+                      <div className="group rounded-2xl border border-amber-500/30 bg-amber-950/10 p-4 space-y-2.5 hover:border-amber-500/50 transition shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            ! TENSION
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">Raised from {activeVersionLabel} · Open</span>
+                        </div>
+
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-100 leading-snug">
+                          Volunteer capacity may not sustain recurring shifts
+                        </h4>
+
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          The current model assumes 12-hour coverage across 4 cooling hubs without shift coverage proof during multi-day thermal spikes.
+                        </p>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveTensionAction()}
+                            className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Inspect
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveTensionAction()}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Challenge
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveTensionAction()}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Resolve
+                          </button>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-semibold text-slate-300">Your Garden is Empty</h3>
-                        <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                          Plant a new seed by chatting with the AI Co-Cultivator in the left pane or create one manually below.
+                    )}
+
+                    {workingMaterialTab === 'insights' && (
+                      <div className="space-y-3">
+                        <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/10 p-4 space-y-2 hover:border-cyan-500/50 transition">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-500/30">
+                              🧠 INSIGHT
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">Informed by census heat map</span>
+                          </div>
+                          <h4 className="text-xs sm:text-sm font-bold text-slate-100">
+                            4 high-risk heat zones identified in Minneapolis south-side
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Phillips, Cedar-Riverside, Powderhorn, and Ventura Village experience elevated surface temperature spikes during heatwaves.
+                          </p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="text-[10px] text-cyan-400 font-mono">Inspectable</span>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/10 p-4 space-y-2 hover:border-cyan-500/50 transition">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-500/30">
+                              🧠 INSIGHT
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">Informed by field study</span>
+                          </div>
+                          <h4 className="text-xs sm:text-sm font-bold text-slate-100">
+                            Ice distribution centers reduce peak heatstroke risk by 34%
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Community shade hubs with active cold storage provide rapid thermal relief for vulnerable residents.
+                          </p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="text-[10px] text-cyan-400 font-mono font-bold">Inspectable</span>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/10 p-4 space-y-2 hover:border-cyan-500/50 transition">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-500/30">
+                              🧠 INSIGHT
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">Informed by municipal park policy</span>
+                          </div>
+                          <h4 className="text-xs sm:text-sm font-bold text-slate-100">
+                            Shade structure placement requires low-barrier park permits
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Park board regulations permit pop-up non-permanent canopies without structural review.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {workingMaterialTab === 'experiments' && (
+                      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/10 p-4 space-y-2 hover:border-emerald-500/50 transition">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-500/30">
+                            🚀 EXPERIMENT
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">Proposed for v0.4 · Pending</span>
+                        </div>
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-100">
+                          2-hour shift signup pilot across Phillips & Cedar-Riverside
+                        </h4>
+                        <p className="text-xs text-slate-400">
+                          Testing neighborhood commitment and shift retention via SMS signup workflows.
+                        </p>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveTensionAction()}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Run Pilot Test
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. IDEA PATH */}
+                <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+                      IDEA PATH
+                    </h3>
+                    <span className="text-[10px] text-slate-500 font-mono">Vertical Version Lineage</span>
+                  </div>
+
+                  <div className="relative border-l-2 border-slate-800 ml-3 pl-5 space-y-4 font-sans">
+                    {/* v0.1 Node */}
+                    <div className="relative">
+                      <div className="absolute -left-[27px] top-1 h-3.5 w-3.5 rounded-full bg-slate-900 border-2 border-slate-700" />
+                      <div className="bg-slate-950/40 rounded-xl p-3 border border-slate-850">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-mono font-bold text-slate-400">v0.1</span>
+                          <span className="text-[10px] text-slate-500">Origin Seed</span>
+                        </div>
+                        <p className="text-xs text-slate-300 font-medium mt-1">Cooling access is uneven in south Minneapolis</p>
+                      </div>
+                    </div>
+
+                    {/* v0.2 Node */}
+                    <div className="relative">
+                      <div className="absolute -left-[27px] top-1 h-3.5 w-3.5 rounded-full bg-slate-900 border-2 border-slate-700" />
+                      <div className="bg-slate-950/40 rounded-xl p-3 border border-slate-850">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-mono font-bold text-slate-400">v0.2</span>
+                          <span className="text-[10px] text-slate-500">Mutual-Aid Model</span>
+                        </div>
+                        <p className="text-xs text-slate-300 font-medium mt-1">Mutual-aid cooling hubs proposed across 4 heat zones</p>
+                      </div>
+                    </div>
+
+                    {/* Current Node */}
+                    <div className="relative">
+                      <div className="absolute -left-[27px] top-1 h-3.5 w-3.5 rounded-full bg-emerald-400 border-2 border-emerald-300 shadow-sm shadow-emerald-400" />
+                      <div className="bg-slate-900/80 rounded-xl p-3 border border-emerald-500/40 shadow-lg">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-mono font-bold text-emerald-400">{activeVersionLabel}</span>
+                          <span className="text-[9px] font-mono font-bold uppercase tracking-wider bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
+                            CURRENT
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-100 font-semibold mt-1">
+                          Capacity tension recorded & shift verification model flagged
                         </p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {filteredIdeas.map((idea) => {
-                        const ideaVersions = allIdeaVersions.filter(v => v.idea_id === idea.id);
-                        const versionLabel = `v0.${ideaVersions.length || 1}`;
-                        const latestArtifact = idea.current_version_id ? artifactMap.get(idea.current_version_id) : null;
-                        const isSelectedForSynth = selectedIdeasForSynthesis.includes(idea.id);
-
-                        return (
-                          <div
-                            key={idea.id}
-                            className={`group rounded-2xl border bg-slate-900/30 p-4 hover:bg-slate-900/50 transition cursor-pointer flex flex-col justify-between relative ${
-                              selectedIdeasForSynthesis.includes(idea.id)
-                                ? 'border-pink-500/30 ring-1 ring-pink-500/20'
-                                : 'border-slate-800/60 hover:border-slate-700'
-                            }`}
-                            onClick={() => setSelectedIdeaId(idea.id)}
-                          >
-                            <div>
-                              {/* Card Header */}
-                              <div className="flex items-start justify-between gap-2 mb-2">
-                                <span className={`text-[9px] uppercase tracking-wider font-mono font-bold px-2 py-0.5 rounded border ${
-                                  idea.taxonomy_level === 'insight'
-                                    ? 'bg-amber-950/40 text-amber-400 border-amber-500/10'
-                                    : idea.taxonomy_level === 'project'
-                                    ? 'bg-violet-950/40 text-violet-400 border-violet-500/10'
-                                    : 'bg-emerald-950/40 text-emerald-400 border-emerald-500/10'
-                                }`}>
-                                  {idea.taxonomy_level}
-                                </span>
-                                
-                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                  {/* Selection Checkbox for synthesis */}
-                                  <button
-                                    onClick={() => toggleIdeaForSynthesis(idea.id)}
-                                    title="Select for cross-pollination synthesis"
-                                    className={`p-1 rounded transition border ${
-                                      isSelectedForSynth
-                                        ? 'bg-pink-500/20 border-pink-500/40 text-pink-400'
-                                        : 'bg-slate-950 border-slate-800 text-slate-600 hover:text-slate-400'
-                                    }`}
-                                  >
-                                    <GitMerge className="h-3 w-3" />
-                                  </button>
-                                  
-                                  <span className="text-[10px] text-slate-500 font-mono font-semibold bg-slate-950/60 border border-slate-850 px-1.5 py-0.5 rounded">
-                                    {versionLabel}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Title */}
-                              <h3 className="text-sm font-bold text-slate-100 group-hover:text-cyan-400 transition mb-1">
-                                {idea.title}
-                              </h3>
-
-                              {/* Content Snippet */}
-                              <p className="text-xs text-slate-400 line-clamp-3 mb-4">
-                                {latestArtifact?.content || "No active content description."}
-                              </p>
-                            </div>
-
-                            {/* Card Footer */}
-                            <div className="flex items-center justify-between border-t border-slate-800/40 pt-2.5 mt-auto text-[10px] text-slate-500">
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {new Date(idea.created_at).toLocaleDateString()}
-                              </span>
-                              
-                              <div className="flex items-center gap-2">
-                                {ideaVersions.length > 1 && (
-                                  <span className="text-[9px] bg-emerald-500/5 text-emerald-400 px-1.5 rounded border border-emerald-500/10 font-medium">
-                                    Evolved {ideaVersions.length - 1}x
-                                  </span>
-                                )}
-                                <span className="flex items-center text-amber-400 font-bold bg-amber-950/20 px-1 rounded border border-amber-500/5">
-                                  {latestArtifact?.witness_strength || 5}★
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Inline Manual Seed Form at the bottom of Overlook */}
-                <div className="p-4 border-t border-slate-800/50 bg-slate-950/40">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <PlusCircle className="h-3.5 w-3.5 text-cyan-400" />
-                      Seed New Living Idea Manually
-                    </span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(['insight', 'idea', 'project'] as const).map((level) => (
-                      <button
-                        key={level}
-                        onClick={() => {
-                          setManualCaptureMode(level);
-                          setCaptureTitle('');
-                          setCaptureContent('');
-                          setCaptureRationale('');
-                          setCaptureWitnessStrength(5);
-                          setCaptureModalData({
-                            text: '',
-                            type: level
-                          });
-                        }}
-                        className={`text-xs rounded-lg px-3 py-1.5 font-bold border transition flex items-center gap-1.5 ${
-                          level === 'insight'
-                            ? 'bg-amber-950/20 border-amber-500/20 text-amber-400 hover:bg-amber-900/20'
-                            : level === 'project'
-                            ? 'bg-violet-950/20 border-violet-500/20 text-violet-400 hover:bg-violet-900/20'
-                            : 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400 hover:bg-emerald-900/20'
-                        }`}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Seeding {level}
-                      </button>
-                    ))}
+
+                  {/* Collapsible Archived Sibling Paths */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowSiblingPaths(!showSiblingPaths)}
+                      className="text-xs font-mono text-slate-400 hover:text-cyan-400 transition cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span>{showSiblingPaths ? '▾ Hide archived sibling paths' : '▸ 1 archived sibling path'}</span>
+                    </button>
+
+                    {showSiblingPaths && (
+                      <div className="mt-2 ml-4 p-3 rounded-xl bg-slate-950/60 border border-slate-850 text-xs space-y-1 text-slate-400 font-mono animate-fadeIn">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-500 block font-bold">Archived Sibling</span>
+                        <p className="text-slate-300 font-semibold">v0.2-fork: Mobile refrigerated truck fleet</p>
+                        <p className="text-[10px] text-slate-500 italic">Archived due to high capital requirements during early pilot stage.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
               </div>
-            ) : (
-              // ---------------- DEEP LINEAGE & VERSION TIMELINE STATE ----------------
-              (() => {
+            )}
+            {(() => {
+              const enableLegacyView = selectedIdeaId === 'legacy_override';
+              if (enableLegacyView) {
                 const idea = ideas.find(i => i.id === selectedIdeaId);
-                if (!idea) return null;
 
                 const ideaVersions = allIdeaVersions.filter(v => v.idea_id === idea.id);
                 const currentVersionLabel = `v0.${ideaVersions.length || 1}`;
@@ -2266,12 +3188,14 @@ function AppContent() {
                     </div>
                   </div>
                 );
-              })()
-            )}
+              }
+              return null;
+            })()}
           </div>
-        </section>
+        </aside>
 
-      </div>
+      </main>
+      )}
 
 
       {/* ========================================================================= */}
@@ -2439,6 +3363,53 @@ function AppContent() {
         </div>
       )}
 
+
+      {/* ============================================================== */}
+      {/* ================= MODAL: CONSTITUTIONAL PULSE WHY ============= */}
+      {showPulseWhyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                </span>
+                <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
+                  Constitutional Pulse Rationale
+                </h3>
+              </div>
+              <button onClick={() => setShowPulseWhyModal(false)} className="text-slate-500 hover:text-slate-300 cursor-pointer">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300">
+              <p className="font-semibold text-slate-100">
+                Why is Jubilee highlighting this assumption right now?
+              </p>
+              <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 space-y-2">
+                <p className="text-amber-200 font-medium">
+                  • <strong>Load-Bearing Dependency:</strong> The current Minneapolis cooling hub model relies completely on unverified volunteer shifts across 4 high-risk heat zones.
+                </p>
+                <p className="text-slate-400">
+                  • <strong>Constitutional Substrate Policy:</strong> High-risk community infrastructure assumptions must be tested or explicitly acknowledged before advancing to implementation stages.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPulseWhyModal(false)}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* ================= MODAL: SYNTHESIS LAB MODAL ================= */}
