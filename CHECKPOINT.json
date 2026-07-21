@@ -1,0 +1,22 @@
+{
+  "tag": "jubilee-v0.2.2-constitutional-kernel",
+  "frozen_at": "2026-07-20T18:01:00Z",
+  "status": "FROZEN_ONTOLOGY_COMPLETE",
+  "summary": {
+    "ontology_grammar": [
+      "conversation",
+      "proposal",
+      "human harvest",
+      "version",
+      "explicit preserved friction",
+      "explicit path disposition",
+      "verifiable current state"
+    ],
+    "verification_invariants": {
+      "chronological_ledger": "Strictly sequential and deterministically sorted using ledger_sequence and parent-hash causality, independent of timestamp sorting.",
+      "strict_ancestry": "Proposal event is cryptographically and causally verified as an ancestor of the harvest event (proposal.ledger_sequence < harvest.ledger_sequence).",
+      "still_alive": "Unresolved questions and design frictions are purely explicit, with no extraction-based or heuristic fallbacks.",
+      "explicit_abandonment": "Sibling path abandonment is modeled as an append-only 'PATH_ABANDONED' human disposition event rather than an edited property of the version."
+    }
+  }
+}

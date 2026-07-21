@@ -182,7 +182,7 @@ async function startServer() {
   app.post("/api/harvest", async (req, res) => {
     try {
       const user = await getAuthenticatedUser(req);
-      const { idea_id, current_artifact_id, new_title, new_content, rationale, vm_id, expected_last_event_hash, actor, idempotency_key } = req.body;
+      const { idea_id, current_artifact_id, new_title, new_content, rationale, vm_id, expected_last_event_hash, actor, idempotency_key, preserved_tensions, unresolved_questions, abandoned_paths } = req.body;
 
       if (!serverSupabase || user.isMock) {
         return res.status(400).json({ error: "Server-side harvest is only active in live Supabase mode." });
@@ -251,6 +251,9 @@ async function startServer() {
         parent_artifact_id: current_artifact_id,
         idempotency_key: finalIdempotencyKey,
         actor: secureActor,
+        preserved_tensions: preserved_tensions || [],
+        unresolved_questions: unresolved_questions || [],
+        abandoned_paths: abandoned_paths || [],
         _signature_hash: ''
       };
 
@@ -304,6 +307,140 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error("Server harvest error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Dedicated Command Endpoint: Authoritatively declare sibling path abandoned
+  app.post("/api/ideas/:ideaId/versions/:versionId/abandon", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser(req);
+      const { ideaId, versionId } = req.params;
+      const { rationale } = req.body;
+
+      if (!serverSupabase || user.isMock) {
+        return res.status(400).json({ error: "Server-side abandonment is only active in live Supabase mode." });
+      }
+
+      // 1. Verify the actor may cultivate that idea (retrieve ownership)
+      const { data: idea, error: ideaErr } = await serverSupabase
+        .from('ideas')
+        .select('*')
+        .eq('id', ideaId)
+        .maybeSingle();
+
+      if (ideaErr || !idea) {
+        return res.status(404).json({ error: `Idea '${ideaId}' not found.` });
+      }
+
+      // If owner_id is set, verify the user is indeed the owner
+      if (idea.owner_id && idea.owner_id !== user.id) {
+        return res.status(403).json({ error: "Forbidden: You are not authorized to cultivate this idea." });
+      }
+
+      // 2. Reject abandonment of the current version unless that is a separately defined operation
+      if (idea.current_version_id === versionId) {
+        return res.status(400).json({ error: "Forbidden: Cannot abandon the current active version of an idea." });
+      }
+
+      // 3. Confirm the version belongs to the specified idea
+      const { data: version, error: versionErr } = await serverSupabase
+        .from('idea_versions')
+        .select('*')
+        .eq('artifact_id', versionId)
+        .eq('idea_id', ideaId)
+        .maybeSingle();
+
+      if (versionErr || !version) {
+        return res.status(404).json({ error: `Version '${versionId}' does not belong to idea '${ideaId}'.` });
+      }
+
+      // 4. Fetch previous event hash to maintain cryptographic link chain
+      let lastHash = 'GENESIS_ANCHOR_v0.2';
+      const { data: latestEvents, error: fetchErr } = await serverSupabase
+        .from('events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (fetchErr) {
+        throw new Error(`Failed to fetch latest events: ${fetchErr.message}`);
+      }
+
+      if (latestEvents && latestEvents.length > 0) {
+        const latestEvent = latestEvents[0];
+        const p = typeof latestEvent.payload === 'string' 
+          ? JSON.parse(latestEvent.payload) 
+          : latestEvent.payload;
+        if (p && p._signature_hash) {
+          lastHash = p._signature_hash;
+        }
+      }
+
+      const generatedId = crypto.randomUUID();
+      const secureActor = {
+        source: 'authenticated_session',
+        id: user.id,
+        email: user.email
+      };
+
+      const finalPayload = {
+        idea_id: ideaId,
+        version_id: versionId,
+        version_number: version.version_number,
+        actor_kind: 'human',
+        rationale: rationale || 'Consciously abandoned sibling path.',
+        witnessed_at: new Date().toISOString(),
+        actor: secureActor,
+        _signature_hash: ''
+      };
+
+      const tempEvent = {
+        id: generatedId,
+        event_type: 'path_abandoned',
+        entity_id: versionId,
+        entity_type: 'artifact',
+        actor: 'human',
+        actor_id: user.email,
+        capability: 'abandon-path',
+        policy: 'v0.4',
+        payload: finalPayload,
+        created_at: new Date().toISOString(),
+        rationale: rationale || null,
+        source_proposal_id: null,
+        witness_strength: 5,
+      };
+
+      // Compute final hash
+      const finalHash = computeEventHash(tempEvent as any, lastHash);
+
+      // Invoke the fully atomic PostgreSQL RPC transaction for path abandonment
+      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('abandon_path_v1', {
+        p_idea_id: ideaId,
+        p_version_id: versionId,
+        p_rationale: rationale,
+        p_actor_id: user.id,
+        p_actor_email: user.email,
+        p_expected_last_event_hash: lastHash,
+        p_computed_hash: finalHash
+      });
+
+      if (rpcErr) {
+        if (rpcErr.message.includes('FORBIDDEN_CULTIVATION_RIGHTS')) {
+          return res.status(403).json({ error: "Forbidden: You are not authorized to cultivate this idea." });
+        }
+        if (rpcErr.message.includes('CANNOT_ABANDON_CURRENT_VERSION')) {
+          return res.status(400).json({ error: "Forbidden: Cannot abandon the current active version of an idea." });
+        }
+        if (rpcErr.message.includes('LEDGER_HEAD_CHANGED')) {
+          return res.status(409).json({ error: "LEDGER_HEAD_CHANGED" });
+        }
+        throw new Error(`Database transaction failed: ${rpcErr.message}`);
+      }
+
+      res.json({ success: true, eventId: generatedId, hash: finalHash });
+    } catch (error: any) {
+      console.error("Server path abandonment error:", error);
       res.status(500).json({ error: error.message });
     }
   });

@@ -614,6 +614,9 @@ export async function evolveIdea(data: {
   new_content: string;
   rationale: string;
   vm_id: string;
+  preserved_tensions?: { id: string; text: string }[];
+  unresolved_questions?: { id: string; text: string }[];
+  abandoned_paths?: { id: string; version_number: number; reason?: string }[];
 }): Promise<Artifact | null> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
@@ -727,7 +730,14 @@ export async function evolveIdea(data: {
     actor_id: 'Human Operator',
     capability: 'evolve-idea',
     policy: 'v0.4',
-    payload: { idea_id: data.idea_id, version: nextVersion, parent_artifact_id: data.current_artifact_id },
+    payload: { 
+      idea_id: data.idea_id, 
+      version: nextVersion, 
+      parent_artifact_id: data.current_artifact_id,
+      preserved_tensions: data.preserved_tensions || [],
+      unresolved_questions: data.unresolved_questions || [],
+      abandoned_paths: data.abandoned_paths || []
+    },
     rationale: data.rationale,
     witness_strength: 5,
   });
@@ -818,4 +828,53 @@ export async function synthesizeIdeas(data: {
   }
 
   return { idea, artifact };
+}
+
+export async function recordPathAbandoned(data: {
+  idea_id: string;
+  version_id: string;
+  version_number: number;
+  rationale: string;
+}): Promise<void> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const isConfigured = supabaseUrl && !supabaseUrl.includes('placeholder') && !supabaseUrl.includes('your-');
+
+  if (isConfigured) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const response = await fetch(`/api/ideas/${data.idea_id}/versions/${data.version_id}/abandon`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ rationale: data.rationale }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to abandon path on server: ${errText}`);
+    }
+    return;
+  }
+
+  await logEvent({
+    event_type: 'path_abandoned',
+    entity_id: data.version_id,
+    entity_type: 'artifact',
+    actor: 'human',
+    actor_id: 'Human Operator',
+    capability: 'abandon-path',
+    policy: 'v0.4',
+    payload: {
+      idea_id: data.idea_id,
+      version_id: data.version_id,
+      version_number: data.version_number,
+      actor_kind: 'human',
+      rationale: data.rationale,
+      witnessed_at: new Date().toISOString()
+    },
+    rationale: data.rationale,
+    witness_strength: 5,
+  });
 }

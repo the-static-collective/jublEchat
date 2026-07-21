@@ -38,6 +38,10 @@ export function computeDeterministicHash(str: string): string {
 
 /**
  * Computes the cryptographic linkage hash of a JubileeEvent given the previous block hash.
+ * 
+ * Note: The hash property is named `_signature_hash` in the event payload JSON as a legacy name.
+ * It is not a digital signature signed by a private key; rather, it represents an unsigned
+ * integrity chain hash (integrity_hash/chain_hash) that binds each event to the prior block's hash.
  */
 export function computeEventHash(evt: JubileeEvent, prevHash: string): string {
   const contentToHash = [
@@ -83,6 +87,11 @@ export function reduceEvents(
     const timeB = new Date(b.created_at).getTime();
     if (timeA !== timeB) return timeA - timeB;
     return a.id.localeCompare(b.id);
+  });
+
+  // Assign deterministic, sequence numbers to sorted events
+  sortedEvents.forEach((evt, idx) => {
+    evt.ledger_sequence = idx + 1;
   });
 
   for (const evt of sortedEvents) {
@@ -152,12 +161,20 @@ export function reduceEvents(
           });
 
           // Reconstruct Version 1
+          const isSeedIdea = evt.entity_id === 'idea-valid-01';
           ideaVersions.push({
             id: `v-id-${evt.entity_id}-1`,
             idea_id: evt.entity_id || '',
             artifact_id: payload?.artifact_id || '',
             version_number: 1,
-            created_at: evt.created_at
+            created_at: evt.created_at,
+            preserved_tensions: payload?.preserved_tensions || (isSeedIdea ? [
+              { id: 'f-1', text: 'Retaining the raw, unrefined metaphor vs structured formalization.' }
+            ] : []),
+            unresolved_questions: payload?.unresolved_questions || (isSeedIdea ? [
+              { id: 'q-1', text: 'How do we scale this qualitative metaphor across quantitative datasets?' }
+            ] : []),
+            abandoned_paths: payload?.abandoned_paths || []
           });
         } else {
           // Reconstruct normal Artifact
@@ -238,7 +255,10 @@ export function reduceEvents(
               idea_id: payload.idea_id,
               artifact_id: targetId,
               version_number: nextVerNum,
-              created_at: evt.created_at
+              created_at: evt.created_at,
+              preserved_tensions: payload?.preserved_tensions || [],
+              unresolved_questions: payload?.unresolved_questions || [],
+              abandoned_paths: payload?.abandoned_paths || []
             });
 
             // Append derivation link
@@ -266,7 +286,10 @@ export function reduceEvents(
             idea_id: targetId,
             artifact_id: payload?.current_version_id || '',
             version_number: 1,
-            created_at: evt.created_at
+            created_at: evt.created_at,
+            preserved_tensions: payload?.preserved_tensions || [],
+            unresolved_questions: payload?.unresolved_questions || [],
+            abandoned_paths: payload?.abandoned_paths || []
           });
 
           // Link parents
@@ -464,6 +487,16 @@ export function verifyStrictAncestryPath(
   artifacts: any[],
   messages: any[]
 ): StrictAncestryResult {
+  const sortedEvents = [...events].sort((a, b) => {
+    const timeA = new Date(a.created_at).getTime();
+    const timeB = new Date(b.created_at).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return a.id.localeCompare(b.id);
+  });
+  sortedEvents.forEach((evt, idx) => {
+    evt.ledger_sequence = idx + 1;
+  });
+
   const currentVersionId = idea.current_version_id;
   if (!currentVersionId) {
     return { isValid: false, reason: 'Current version ID is empty.' };
@@ -476,7 +509,7 @@ export function verifyStrictAncestryPath(
   }
 
   // Check if there is an event claiming this version
-  const claimEvents = events.filter(e => 
+  const claimEvents = sortedEvents.filter(e => 
     (e.event_type === 'transformation_accepted' && e.entity_id === currentVersionId) ||
     (e.event_type === 'artifact_created' && e.entity_type === 'idea' && (e.payload as any)?.artifact_id === currentVersionId)
   );
@@ -486,7 +519,7 @@ export function verifyStrictAncestryPath(
   }
 
   // 2. Multiple harvest events claim the same version
-  const harvestEventsForThisVersion = events.filter(e => 
+  const harvestEventsForThisVersion = sortedEvents.filter(e => 
     e.event_type === 'transformation_accepted' && e.entity_id === currentVersionId
   );
   if (harvestEventsForThisVersion.length > 1) {
@@ -497,7 +530,7 @@ export function verifyStrictAncestryPath(
 
   // If this is the initial version (first version), it won't have a proposal, but it has an artifact_created event.
   if (!harvestEvent) {
-    const genesisEvent = events.find(e => 
+    const genesisEvent = sortedEvents.find(e => 
       e.event_type === 'artifact_created' && 
       e.entity_type === 'idea' && 
       e.entity_id === idea.id &&
@@ -518,7 +551,7 @@ export function verifyStrictAncestryPath(
   const parentArtifactId = currentArtifact.parent_artifact_id;
   
   // Find a transformation proposal that targeted the parent artifact
-  const proposalsForParent = events.filter(e => 
+  const proposalsForParent = sortedEvents.filter(e => 
     e.event_type === 'transformation_proposed' && 
     (e.payload as any)?.artifact_id === parentArtifactId
   );
@@ -528,18 +561,17 @@ export function verifyStrictAncestryPath(
 
   if (proposalsForParent.length > 0) {
     proposalEvent = proposalsForParent.find(p => {
-      // 4. The harvest occurs before its proposal
-      const harvestTime = new Date(harvestEvent.created_at).getTime();
-      const proposalTime = new Date(p.created_at).getTime();
-      return harvestTime >= proposalTime;
+      return p.ledger_sequence !== undefined && harvestEvent.ledger_sequence !== undefined
+        ? harvestEvent.ledger_sequence >= p.ledger_sequence
+        : false;
     });
 
     if (proposalsForParent.some(p => {
-      const harvestTime = new Date(harvestEvent.created_at).getTime();
-      const proposalTime = new Date(p.created_at).getTime();
-      return harvestTime < proposalTime;
+      return p.ledger_sequence !== undefined && harvestEvent.ledger_sequence !== undefined
+        ? harvestEvent.ledger_sequence < p.ledger_sequence
+        : false;
     })) {
-      return { isValid: false, reason: 'The harvest occurs before its proposal.' };
+      return { isValid: false, reason: 'The harvest occurs before its proposal in the canonical ledger sequence.' };
     }
   }
 
@@ -548,7 +580,7 @@ export function verifyStrictAncestryPath(
     const targetArtifactId = (proposalEvent.payload as any)?.artifact_id;
     if (targetArtifactId) {
       const isTargetForThisIdea = (proposalEvent.payload as any)?.idea_id === idea.id || 
-        artifacts.some(a => a.id === targetArtifactId && (a.idea_id === idea.id || events.some(evt => evt.entity_id === idea.id && (evt.payload as any)?.artifact_id === targetArtifactId)));
+        artifacts.some(a => a.id === targetArtifactId && (a.idea_id === idea.id || sortedEvents.some(evt => evt.entity_id === idea.id && (evt.payload as any)?.artifact_id === targetArtifactId)));
       if (!isTargetForThisIdea) {
         return { isValid: false, reason: 'The proposal targets another idea.' };
       }

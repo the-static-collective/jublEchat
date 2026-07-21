@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Sprout, ArrowUp, GitBranch, Star, X, Search, Plus, Leaf, Recycle, Moon, Check } from 'lucide-react';
-import { useIdeas, useIdeaVersions, useArtifacts, useEvents, createIdea, evolveIdea, updateIdeaLifecycle } from '../lib/hooks';
+import { Sprout, ArrowUp, GitBranch, X, Search, Plus, Leaf, Recycle, Moon, Trash2 } from 'lucide-react';
+import { useIdeas, useIdeaVersions, useArtifacts, useEvents, createIdea, evolveIdea, updateIdeaLifecycle, recordPathAbandoned } from '../lib/hooks';
 import { formatDate } from '../lib/constants';
 import { WITNESS_LABELS, type Idea, type LifecycleStatus } from '../lib/types';
 
@@ -98,7 +98,6 @@ export function IdeaLineage() {
           ) : (
             <LineageView
               idea={selectedIdea}
-              artifacts={artifacts}
               artifactMap={artifactMap}
               onEvolve={() => setEvolving(true)}
               onSetLifecycle={(status) => updateIdeaLifecycle(selectedIdea.id, status).then(refetchIdeas)}
@@ -123,16 +122,19 @@ export function IdeaLineage() {
   );
 }
 
-function LineageView({ idea, artifacts, artifactMap, onEvolve, onSetLifecycle }: {
+function LineageView({ idea, artifactMap, onEvolve, onSetLifecycle }: {
   idea: Idea;
-  artifacts: import('../lib/types').Artifact[];
   artifactMap: Map<string, import('../lib/types').Artifact>;
   onEvolve: () => void;
   onSetLifecycle: (status: LifecycleStatus) => void;
 }) {
-  const { versions } = useIdeaVersions(idea.id);
-  const { events } = useEvents(idea.id);
+  const { versions, refetch: refetchVersions } = useIdeaVersions(idea.id);
+  const { events, refetch: refetchEvents } = useEvents();
   const meta = LIFECYCLE_META[idea.lifecycle_status];
+
+  const [abandoningVersionId, setAbandoningVersionId] = useState<string | null>(null);
+  const [abandonRationale, setAbandonRationale] = useState('');
+  const [abandonBusy, setAbandonBusy] = useState(false);
 
   const lineageVersions = useMemo(() => {
     return versions
@@ -141,7 +143,25 @@ function LineageView({ idea, artifacts, artifactMap, onEvolve, onSetLifecycle }:
       .sort((a, b) => b.version_number - a.version_number);
   }, [versions, artifactMap]);
 
-  const rationaleEvents = events.filter((e) => e.rationale);
+  const rationaleEvents = useMemo(() => {
+    return events.filter((e) => e.rationale && (e.entity_id === idea.id || (e.payload as any)?.idea_id === idea.id));
+  }, [events, idea.id]);
+
+  const handleAbandonPath = async (v: typeof lineageVersions[number]) => {
+    if (!v.artifact_id) return;
+    setAbandonBusy(true);
+    await recordPathAbandoned({
+      idea_id: idea.id,
+      version_id: v.artifact_id,
+      version_number: v.version_number,
+      rationale: abandonRationale.trim() || 'Consciously abandoned sibling path.'
+    });
+    setAbandoningVersionId(null);
+    setAbandonRationale('');
+    setAbandonBusy(false);
+    refetchEvents();
+    refetchVersions();
+  };
 
   return (
     <div className="space-y-4">
@@ -179,21 +199,94 @@ function LineageView({ idea, artifacts, artifactMap, onEvolve, onSetLifecycle }:
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-3">Ancestry</div>
             <div className="space-y-0">
-              {lineageVersions.slice(1).map((v, i) => (
-                <div key={v.id} className="relative pl-6 pb-4 last:pb-0">
-                  <div className="absolute left-2 top-0 bottom-0 w-px bg-slate-700/50" style={{ height: i === lineageVersions.length - 2 ? '0' : undefined }} />
-                  <div className="absolute left-0 top-1 h-4 w-4 rounded-full border-2 border-slate-700 bg-slate-900" />
-                  <div className="ml-2">
-                    <div className="text-xs text-slate-500 mb-0.5">v{v.version_number}</div>
-                    <p className="text-sm text-slate-400">{v.artifact?.content || v.artifact?.title}</p>
-                    <div className="text-[10px] text-slate-600 mt-0.5">{formatDate(v.artifact?.created_at ?? '')}</div>
+              {lineageVersions.slice(1).map((v, i) => {
+                const abandonEvent = events.find(e => {
+                  if (e.event_type !== 'path_abandoned') return false;
+                  if (e.entity_id === v.artifact_id) return true;
+                  try {
+                    const p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
+                    return p?.version_id === v.artifact_id;
+                  } catch {
+                    return false;
+                  }
+                });
+                return (
+                  <div key={v.id} className="relative pl-6 pb-4 last:pb-0">
+                    <div className="absolute left-2 top-0 bottom-0 w-px bg-slate-700/50" style={{ height: i === lineageVersions.length - 2 ? '0' : undefined }} />
+                    <div className="absolute left-0 top-1 h-4 w-4 rounded-full border-2 border-slate-700 bg-slate-900" />
+                    <div className="ml-2">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-xs text-slate-500 font-mono">v{v.version_number}</span>
+                        <span className="text-[10px] text-slate-600 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Historical form</span>
+                      </div>
+                      <p className={`text-sm ${abandonEvent ? 'text-slate-500 line-through opacity-80' : 'text-slate-400'}`}>
+                        {v.artifact?.content || v.artifact?.title}
+                      </p>
+                      <div className="text-[10px] text-slate-600 mt-0.5">{formatDate(v.artifact?.created_at ?? '')}</div>
+                    </div>
+                    {(() => {
+                      if (abandonEvent) {
+                        return (
+                          <div className="ml-2 mt-2 p-2 bg-rose-950/10 border border-rose-500/10 rounded-lg text-rose-300 space-y-1">
+                            <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1">
+                              <span>⊘ Path later declared abandoned</span>
+                            </p>
+                            <p className="text-xs italic text-slate-300">"Reason: {abandonEvent.rationale || 'No rationale given.'}"</p>
+                            <p className="text-[8px] text-slate-500">Witnessed at {formatDate(abandonEvent.created_at)}</p>
+                          </div>
+                        );
+                      } else if (abandoningVersionId === v.artifact_id) {
+                        return (
+                          <div className="ml-2 mt-2 p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg space-y-2">
+                            <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Declare Sibling Path Abandoned</p>
+                            <textarea
+                              value={abandonRationale}
+                              onChange={(e) => setAbandonRationale(e.target.value)}
+                              placeholder="State rationale for path disposition..."
+                              rows={2}
+                              className="w-full rounded border border-slate-700 bg-slate-950 py-1 px-2 text-xs text-slate-200 outline-none focus:border-rose-500 resize-none animate-fade-in"
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                disabled={abandonBusy}
+                                onClick={() => setAbandoningVersionId(null)}
+                                className="px-2 py-1 text-[10px] font-medium text-slate-400 hover:text-slate-200"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                disabled={abandonBusy || !abandonRationale.trim()}
+                                onClick={() => handleAbandonPath(v)}
+                                className="px-2 py-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 text-[10px] font-medium transition"
+                              >
+                                {abandonBusy ? 'Logging...' : 'Confirm Abandonment'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="ml-2 mt-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                              <ArrowUp className="h-3 w-3" />
+                              evolved from
+                            </div>
+                            <button
+                              onClick={() => {
+                                setAbandoningVersionId(v.artifact_id);
+                                setAbandonRationale('');
+                              }}
+                              className="text-[10px] text-slate-500 hover:text-rose-400 border border-slate-800/60 hover:border-rose-950/50 px-2 py-0.5 rounded transition"
+                            >
+                              ⊘ Declare Sibling Abandoned
+                            </button>
+                          </div>
+                        );
+                      }
+                    })()}
                   </div>
-                  <div className="ml-2 mt-1 flex items-center gap-1 text-[10px] text-slate-600">
-                    <ArrowUp className="h-3 w-3" />
-                    evolved from
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -306,16 +399,52 @@ function EvolveModal({ idea, currentArtifact, onClose, onEvolved }: {
   const [rationale, setRationale] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Still Alive inputs
+  const [tensions, setTensions] = useState<string[]>([]);
+  const [newTension, setNewTension] = useState('');
+
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [newQuestion, setNewQuestion] = useState('');
+
+  const handleAddTension = () => {
+    if (newTension.trim()) {
+      setTensions([...tensions, newTension.trim()]);
+      setNewTension('');
+    }
+  };
+
+  const handleRemoveTension = (index: number) => {
+    setTensions(tensions.filter((_, i) => i !== index));
+  };
+
+  const handleAddQuestion = () => {
+    if (newQuestion.trim()) {
+      setQuestions([...questions, newQuestion.trim()]);
+      setNewQuestion('');
+    }
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    setQuestions(questions.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() || !rationale.trim() || !currentArtifact) return;
     setBusy(true);
+
+    const preserved_tensions = tensions.map((t, idx) => ({ id: `t-${Date.now()}-${idx}`, text: t }));
+    const unresolved_questions = questions.map((q, idx) => ({ id: `q-${Date.now()}-${idx}`, text: q }));
+
     await evolveIdea({
       idea_id: idea.id,
       current_artifact_id: currentArtifact.id,
       new_content: content.trim(),
       rationale: rationale.trim(),
       vm_id: currentArtifact.vm_id,
+      preserved_tensions,
+      unresolved_questions,
+      abandoned_paths: []
     });
     setBusy(false);
     onEvolved();
@@ -323,41 +452,119 @@ function EvolveModal({ idea, currentArtifact, onClose, onEvolved }: {
 
   return (
     <Modal onClose={onClose} title={`Evolve: ${idea.title}`}>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5 max-h-[80vh] overflow-y-auto pr-1">
         {currentArtifact && (
           <div className="rounded-lg bg-slate-800/40 p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Current</div>
-            <p className="text-sm text-slate-400">{currentArtifact.content || currentArtifact.title}</p>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Current Form</div>
+            <p className="text-sm text-slate-400 leading-normal italic">"{currentArtifact.content || currentArtifact.title}"</p>
           </div>
         )}
+        
         <div>
-          <label className="text-xs font-medium text-slate-400 mb-1.5 block">New Version</label>
+          <label className="text-xs font-semibold text-slate-300 mb-1.5 block">New Version Content</label>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             autoFocus
-            placeholder="How has this idea evolved?"
-            rows={4}
-            className="w-full rounded-xl border border-slate-700/50 bg-slate-950/60 py-2.5 px-4 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/50 resize-none"
+            placeholder="Describe the refined state of this idea..."
+            rows={3}
+            className="w-full rounded-xl border border-slate-700/50 bg-slate-950/60 py-2 px-3 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/50 resize-none"
           />
         </div>
+
         <div>
-          <label className="text-xs font-medium text-slate-400 mb-1.5 block">Rationale</label>
+          <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Evolution Rationale</label>
           <textarea
             value={rationale}
             onChange={(e) => setRationale(e.target.value)}
-            placeholder="Why does this new version exist? What changed in your understanding?"
+            placeholder="Why is this mutation being harvested? What changed?"
             rows={2}
-            className="w-full rounded-xl border border-slate-700/50 bg-slate-950/60 py-2.5 px-4 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/50 resize-none"
+            className="w-full rounded-xl border border-slate-700/50 bg-slate-950/60 py-2 px-3 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500/50 resize-none"
           />
         </div>
+
+        {/* --- STILL ALIVE: HUMAN WITNESSED PRESERVATION --- */}
+        <div className="border-t border-slate-850 pt-4 space-y-4">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-amber-500/90">
+            Still Alive: Witnessed Preservation
+          </div>
+
+          {/* 1. Preserved Frictions / Tensions */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-slate-400 block">Preserved Frictions / Tensions</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newTension}
+                onChange={(e) => setNewTension(e.target.value)}
+                placeholder="What design frictions/tensions are staying active?"
+                className="flex-1 rounded-xl border border-slate-700/50 bg-slate-950/40 py-1.5 px-3 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-pink-500/40"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddTension(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddTension}
+                className="rounded-xl bg-slate-800 hover:bg-slate-700 p-2 text-pink-400 transition"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            {tensions.length > 0 && (
+              <ul className="space-y-1.5 pt-1">
+                {tensions.map((t, idx) => (
+                  <li key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-pink-950/10 border border-pink-500/10 py-1 px-2.5 text-xs text-pink-300">
+                    <span className="italic">"{t}"</span>
+                    <button type="button" onClick={() => handleRemoveTension(idx)} className="text-slate-500 hover:text-rose-400 p-0.5">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 2. Unresolved Questions */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-slate-400 block">Unresolved Questions</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newQuestion}
+                onChange={(e) => setNewQuestion(e.target.value)}
+                placeholder="What unanswered question keeps this node dynamic?"
+                className="flex-1 rounded-xl border border-slate-700/50 bg-slate-950/40 py-1.5 px-3 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-amber-500/40"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddQuestion(); } }}
+              />
+              <button
+                type="button"
+                onClick={handleAddQuestion}
+                className="rounded-xl bg-slate-800 hover:bg-slate-700 p-2 text-amber-400 transition"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            {questions.length > 0 && (
+              <ul className="space-y-1.5 pt-1">
+                {questions.map((q, idx) => (
+                  <li key={idx} className="flex items-center justify-between gap-2 rounded-lg bg-amber-950/10 border border-amber-500/10 py-1 px-2.5 text-xs text-amber-300">
+                    <span className="italic">"{q}"</span>
+                    <button type="button" onClick={() => handleRemoveQuestion(idx)} className="text-slate-500 hover:text-rose-400 p-0.5">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
         <button
           type="submit"
           disabled={busy || !content.trim() || !rationale.trim()}
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 py-2.5 text-sm font-semibold text-white transition hover:from-cyan-400 hover:to-violet-400 disabled:opacity-50"
         >
           <ArrowUp className="h-4 w-4" />
-          {busy ? 'Evolving...' : 'Create New Version'}
+          {busy ? 'Evolving...' : 'Create Witnessed Version'}
         </button>
       </form>
     </Modal>

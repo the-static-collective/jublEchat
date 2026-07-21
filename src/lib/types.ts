@@ -139,12 +139,26 @@ export interface Idea {
   taxonomy_level?: TaxonomyLevel;
 }
 
+export interface FrictionRef {
+  id: string;
+  text: string;
+}
+
+export interface AbandonedPathRef {
+  id: string;
+  version_number: number;
+  reason?: string;
+}
+
 export interface IdeaVersion {
   id: string;
   idea_id: string;
   artifact_id: string;
   version_number: number;
   created_at: string;
+  preserved_tensions: FrictionRef[];
+  unresolved_questions: FrictionRef[];
+  abandoned_paths: AbandonedPathRef[];
 }
 
 export type WitnessStrength = 5 | 3 | 1;
@@ -169,6 +183,7 @@ export interface JubileeEvent {
   rationale: string | null;
   source_proposal_id: string | null;
   witness_strength: number;
+  ledger_sequence?: number;
 }
 
 export interface Proposal {

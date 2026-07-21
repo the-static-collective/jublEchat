@@ -1778,12 +1778,34 @@ function AppContent() {
                           }
 
                           // Derive Still Alive attributes
-                          const latestContent = latestArtifact?.content || '';
-                          const lines = latestContent.split(/[\r\n]+/);
-                          const unresolvedQuestions = lines
-                            .map(l => l.trim())
-                            .filter(l => l.endsWith('?'))
-                            .slice(0, 3);
+                          const currentVersionObj = allIdeaVersions.find(v => v.artifact_id === idea.current_version_id);
+                          const explicitTensions = currentVersionObj?.preserved_tensions || [];
+                          const explicitQuestions = currentVersionObj?.unresolved_questions || [];
+                          const explicitEventAbandoned = events
+                            .filter(e => {
+                              if (e.event_type !== 'path_abandoned') return false;
+                              try {
+                                const p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
+                                return p?.idea_id === idea.id;
+                              } catch {
+                                return false;
+                              }
+                            })
+                            .map(e => {
+                              let p: any = {};
+                              try {
+                                p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
+                              } catch {}
+                              return {
+                                id: e.id,
+                                version_number: p?.version_number || 1,
+                                reason: e.rationale || p?.rationale || 'Abandoned sibling path.'
+                              };
+                            });
+                          const explicitAbandoned = [
+                            ...(currentVersionObj?.abandoned_paths || []),
+                            ...explicitEventAbandoned
+                          ];
 
                           const pastVersionsOfThisIdea = allIdeaVersions
                             .filter(v => v.idea_id === idea.id && v.artifact_id !== idea.current_version_id)
@@ -1925,31 +1947,43 @@ function AppContent() {
                                     <div className="space-y-3">
                                       {/* Unresolved Questions */}
                                       <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
-                                        <p className="text-[8px] font-mono text-amber-400 uppercase font-bold tracking-wider">
-                                          Unresolved Questions
-                                        </p>
-                                        {unresolvedQuestions.length > 0 ? (
+                                        <div className="flex items-center justify-between">
+                                          <p className="text-[8px] font-mono text-amber-400 uppercase font-bold tracking-wider">
+                                            Unresolved Questions
+                                          </p>
+                                          {explicitQuestions.length > 0 && (
+                                            <span className="text-[7px] font-mono bg-amber-950 text-amber-400 px-1 rounded uppercase font-bold">Explicit</span>
+                                          )}
+                                        </div>
+                                        {explicitQuestions.length > 0 ? (
                                           <ul className="list-disc pl-3 text-[10px] text-slate-400 space-y-1">
-                                            {unresolvedQuestions.map((q, qIdx) => (
-                                              <li key={qIdx} className="italic leading-normal">"{q}"</li>
+                                            {explicitQuestions.map((q) => (
+                                              <li key={q.id} className="italic leading-normal">"{q.text}"</li>
                                             ))}
                                           </ul>
                                         ) : (
                                           <p className="text-[10px] text-slate-550 italic leading-relaxed">
-                                            No active questions flagged in the content. Ask an unanswered question to leave a structural tension.
+                                            No explicit unresolved questions flagged.
                                           </p>
                                         )}
                                       </div>
 
-                                      {/* Preserved Tensions from rationale */}
+                                      {/* Preserved Tensions */}
                                       <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
-                                        <p className="text-[8px] font-mono text-pink-400 uppercase font-bold tracking-wider">
-                                          Preserved Frictions
-                                        </p>
-                                        {latestArtifact?.origin ? (
-                                          <p className="text-[10px] text-slate-400 leading-normal italic">
-                                            "{latestArtifact.origin}"
+                                        <div className="flex items-center justify-between">
+                                          <p className="text-[8px] font-mono text-pink-400 uppercase font-bold tracking-wider">
+                                            Preserved Frictions
                                           </p>
+                                          {explicitTensions.length > 0 && (
+                                            <span className="text-[7px] font-mono bg-pink-950 text-pink-400 px-1 rounded uppercase font-bold">Explicit</span>
+                                          )}
+                                        </div>
+                                        {explicitTensions.length > 0 ? (
+                                          <ul className="list-disc pl-3 text-[10px] text-slate-400 space-y-1">
+                                            {explicitTensions.map((t) => (
+                                              <li key={t.id} className="italic leading-normal">"{t.text}"</li>
+                                            ))}
+                                          </ul>
                                         ) : (
                                           <p className="text-[10px] text-slate-550 italic leading-normal">
                                             No explicit design frictions logged.
@@ -1958,25 +1992,47 @@ function AppContent() {
                                       </div>
 
                                       {/* Abandoned Paths */}
-                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
-                                        <p className="text-[8px] font-mono text-violet-400 uppercase font-bold tracking-wider">
-                                          Abandoned Paths
-                                        </p>
-                                        {pastVersionsOfThisIdea.length > 0 ? (
-                                          <div className="space-y-1">
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <p className="text-[8px] font-mono text-violet-400 uppercase font-bold tracking-wider">
+                                            Abandoned Paths
+                                          </p>
+                                          {explicitAbandoned.length > 0 && (
+                                            <span className="text-[7px] font-mono bg-violet-950 text-violet-400 px-1 rounded uppercase font-bold text-[7px]">Explicit Dispositions</span>
+                                          )}
+                                        </div>
+                                        {explicitAbandoned.length > 0 ? (
+                                          <div className="space-y-1.5">
+                                            {explicitAbandoned.map((p) => (
+                                              <div key={p.id} className="text-[10px] bg-slate-950/40 p-1.5 rounded border border-violet-900/20 leading-relaxed">
+                                                <div className="flex items-center gap-1.5 mb-0.5">
+                                                  <span className="text-[8px] font-mono text-violet-400 bg-violet-950 px-1 py-0.2 rounded font-bold uppercase">
+                                                    v0.{p.version_number}
+                                                  </span>
+                                                  <span className="text-[8px] font-semibold text-slate-500 uppercase tracking-wider">Abandoned disposition</span>
+                                                </div>
+                                                <p className="text-slate-400 italic">"{p.reason}"</p>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : pastVersionsOfThisIdea.length > 0 ? (
+                                          <div className="space-y-1.5">
                                             <p className="text-[10px] text-slate-400 leading-normal">
-                                              {pastVersionsOfThisIdea.length} inactive version{pastVersionsOfThisIdea.length > 1 ? 's' : ''} preserved in the immutable history.
+                                              {pastVersionsOfThisIdea.length} inactive version{pastVersionsOfThisIdea.length > 1 ? 's' : ''} in historical lineage.
                                             </p>
-                                            <div className="flex gap-1.5 flex-wrap pt-0.5">
+                                            <div className="flex gap-1.5 flex-wrap">
                                               {pastVersionsOfThisIdea.map((v) => (
                                                 <span key={v.id} className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1 py-0.5 rounded uppercase">
                                                   v0.{v.version_number}
                                                 </span>
                                               ))}
                                             </div>
+                                            <p className="text-[9px] text-slate-550 leading-relaxed italic">
+                                              Note: Sibling paths exist in index but no explicit abandonment witness has been filed.
+                                            </p>
                                           </div>
                                         ) : (
-                                          <p className="text-[10px] text-slate-550 italic leading-relaxed">
+                                          <p className="text-[10px] text-slate-555 italic leading-relaxed">
                                             This is the genesis version. No earlier branches have been abandoned.
                                           </p>
                                         )}
