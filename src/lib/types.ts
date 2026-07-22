@@ -117,6 +117,7 @@ export interface GraphEdge {
 
 export type EventType =
   | 'artifact_created'
+  | 'external_artifact_created'
   | 'claim_added'
   | 'transformation_proposed'
   | 'transformation_accepted'
@@ -126,6 +127,43 @@ export type EventType =
   | 'projection_generated'
   | 'receipt_issued'
   | 'vm_created';
+
+export interface ExportPacket {
+  ideaId: string;
+  versionId: string;
+  versionNumber: number;
+  formulation: string;
+  insights: string[];
+  tensions: string[];
+  experiments: string[];
+  openQuestion?: string;
+  lineage: {
+    parentVersionIds: string[];
+    sourceEventIds: string[];
+  };
+  generatedAt: string;
+  packetHash: string;
+}
+
+export interface ExternalArtifact {
+  id: string;
+  ideaId: string;
+  sourceVersionId: string;
+  sourceVersionNumber: number;
+  exportPacketHash: string;
+  templateType: 'project_brief' | 'one_page_proposal' | 'research_plan';
+  title: string;
+  content: string;
+  status: 'draft' | 'human_approved' | 'superseded';
+  createdAt: string;
+  tone?: string;
+  kernelSummary: {
+    insightsCount: number;
+    tensionsCount: number;
+    openQuestionsCount: number;
+  };
+  exportPacket: ExportPacket;
+}
 
 export type LifecycleStatus = 'active' | 'dormant' | 'merged' | 'abandoned';
 export type TaxonomyLevel = 'insight' | 'idea' | 'project';

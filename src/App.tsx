@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Sprout, Leaf, Send, HelpCircle, GitMerge, GitBranch, Clock, Check, X,
   RefreshCw, Plus, MessageSquare, Sparkles, AlertTriangle, Network, PlusCircle, ArrowLeft,
-  Shield, Database, Terminal, CheckCircle2, AlertCircle, History, ArrowDown, ShieldCheck, Flame
+  Shield, Database, Terminal, CheckCircle2, AlertCircle, History, ArrowDown, ShieldCheck, Flame, FileText
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './lib/auth';
 import {
@@ -10,7 +10,8 @@ import {
   createIdea, evolveIdea, logEvent, synthesizeIdeas
 } from './lib/hooks';
 import { GraphCanvas } from './components/GraphCanvas';
-import { type TaxonomyLevel, type ChatMessage, type ProvenanceCue, type DeliberationLoop } from './lib/types';
+import { ExportSheetModal } from './components/ExportSheetModal';
+import { type TaxonomyLevel, type ChatMessage, type ProvenanceCue, type DeliberationLoop, type ExternalArtifact, type ExportPacket, type JubileeEvent } from './lib/types';
 import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents, verifyStrictAncestryPath } from './lib/ledger';
 import { runIntegrationTests, type TestResult } from './lib/test-boundary';
 
@@ -172,6 +173,22 @@ function AppContent() {
   const [fixtureConsoleLogs, setFixtureConsoleLogs] = useState<string[]>([]);
   const [boundaryTestResults, setBoundaryTestResults] = useState<TestResult[] | null>(null);
   const [boundaryTestingRunning, setBoundaryTestingRunning] = useState(false);
+
+  // Export Artifact & External Artifact State
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedExternalArtifactId, setSelectedExternalArtifactId] = useState<string | null>(null);
+  const [externalArtifacts, setExternalArtifacts] = useState<ExternalArtifact[]>(() => {
+    const saved = localStorage.getItem('jubilee_external_artifacts');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('jubilee_external_artifacts', JSON.stringify(externalArtifacts));
+  }, [externalArtifacts]);
 
   // Recomposed Workspace States
   const [pulseMuted, setPulseMuted] = useState(false);
@@ -815,7 +832,58 @@ function AppContent() {
   };
 
   const selectedIdeaVersions = allIdeaVersions.filter(v => v.idea_id === (selectedIdea?.id || 'idea-mpls-01'));
-  const activeVersionLabel = selectedIdeaVersions.length > 0 ? `v0.${selectedIdeaVersions[0].version_number}` : 'v0.2';
+  const activeVersionLabel = selectedIdeaVersions.length > 0 ? `v0.${selectedIdeaVersions[0].version_number}` : 'v0.3';
+
+  const handleSaveExternalArtifact = (artifact: ExternalArtifact) => {
+    setExternalArtifacts((prev) => [artifact, ...prev]);
+
+    // Append EXTERNAL_ARTIFACT_CREATED event to Jubilee event ledger
+    const newEvt: JubileeEvent = {
+      id: `evt-ext-${Date.now().toString().slice(-6)}`,
+      event_type: 'external_artifact_created',
+      entity_id: artifact.id,
+      entity_type: 'external_artifact',
+      actor: user?.email || 'Operator / Human',
+      actor_id: user?.id || 'op-01',
+      capability: 'artifact-export',
+      policy: 'human-review-required',
+      payload: {
+        artifact_id: artifact.id,
+        idea_id: artifact.ideaId,
+        source_version_id: artifact.sourceVersionId,
+        source_version_number: artifact.sourceVersionNumber,
+        export_packet_hash: artifact.exportPacketHash,
+        template_type: artifact.templateType,
+        title: artifact.title,
+        status: artifact.status,
+        _signature_hash: artifact.exportPacketHash,
+        _prev_hash: events[0]?.payload?._signature_hash || `sha256-link-${events.length}`,
+      },
+      created_at: new Date().toISOString(),
+      rationale: `Exported AI-assisted Project Brief from ${activeVersionLabel} kernel.`,
+      source_proposal_id: null,
+      witness_strength: 5,
+    };
+
+    setEvents((prev) => [newEvt, ...prev]);
+
+    // Post confirmation message to chat log
+    const exportMsg: ChatMessage = {
+      id: `msg-ext-${Date.now()}`,
+      role: 'system',
+      content: {
+        text: `📄 **External Artifact Exported & Registered**\n\nCreated **${artifact.title}** linked to **${activeVersionLabel}**.\n\n- **Packet Hash**: \`${artifact.exportPacketHash}\`\n- **Status**: \`Draft (Requires Human Review)\`\n- **Template**: \`Project Brief\`\n\nThis artifact is registered in the Substrate Event Ledger and linked to source version \`${artifact.sourceVersionId}\`.`,
+        provenance: {
+          contributor: 'System Witness Ledger',
+          informed_by: `${activeVersionLabel} Fixed Kernel`,
+          delta_summary: 'Registered External Artifact Provenance',
+        },
+      },
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, exportMsg]);
+  };
 
   return (
     <div className="h-dvh overflow-hidden flex flex-col bg-slate-950 text-slate-100 font-sans">
@@ -1290,16 +1358,60 @@ function AppContent() {
 
               {architectNavTab === 'receipts' && (
                 <div className="space-y-1.5">
-                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850">
-                    Witness Receipts & Attestations
+                  <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-slate-850 flex items-center justify-between">
+                    <span>Exported Artifacts ({externalArtifacts.length})</span>
+                    <span>Lineage Receipts</span>
                   </div>
+
+                  {externalArtifacts.length > 0 && (
+                    <div className="space-y-1.5 mb-3">
+                      {externalArtifacts.map((art) => {
+                        const isSelected = selectedExternalArtifactId === art.id;
+                        return (
+                          <div
+                            key={art.id}
+                            onClick={() => setSelectedExternalArtifactId(art.id)}
+                            className={`p-2.5 rounded-xl border text-xs font-mono transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-violet-950/80 border-violet-500/60 text-slate-100 shadow-md ring-1 ring-violet-500/30'
+                                : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[10px] mb-1 font-bold">
+                              <span className="text-violet-400 uppercase flex items-center gap-1">
+                                <FileText className="h-3 w-3" />
+                                {art.templateType.replace('_', ' ')}
+                              </span>
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] uppercase font-bold border ${
+                                art.status === 'human_approved'
+                                  ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30'
+                                  : art.status === 'superseded'
+                                  ? 'bg-slate-900 text-slate-500 border-slate-800'
+                                  : 'bg-amber-950 text-amber-300 border-amber-500/30'
+                              }`}>
+                                {art.status}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-200 font-bold truncate">
+                              {art.title}
+                            </p>
+                            <div className="mt-1.5 flex items-center justify-between text-[9px] text-slate-400 border-t border-slate-800 pt-1">
+                              <span>Source: v0.{art.sourceVersionNumber}</span>
+                              <span className="text-cyan-400">{art.exportPacketHash.substring(0, 10)}...</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 text-xs space-y-1 font-mono">
                     <div className="flex items-center justify-between text-emerald-400 font-bold text-[10px]">
                       <span>RECEIPT #rcpt-001</span>
                       <span>VERIFIED</span>
                     </div>
                     <p className="text-[11px] text-slate-200">
-                      Attestation for Minneapolis Cooling Infrastructure v0.2. Cryptographically signed by Operator & System Witness.
+                      Attestation for Minneapolis Cooling Infrastructure v0.3. Cryptographically signed by Operator & System Witness.
                     </p>
                     <div className="text-[9px] text-slate-400 border-t border-emerald-500/20 pt-1 flex justify-between">
                       <span>Hash: sha256-a000...</span>
@@ -1391,7 +1503,127 @@ function AppContent() {
 
             {/* Inspector Details */}
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 text-xs font-mono scrollbar-thin">
-              {(() => {
+              {selectedExternalArtifactId ? (() => {
+                const art = externalArtifacts.find((a) => a.id === selectedExternalArtifactId);
+                if (!art) return null;
+                return (
+                  <div className="space-y-3 font-mono text-xs animate-fadeIn">
+                    <div className="bg-slate-900/80 border border-violet-500/40 rounded-xl p-3 space-y-2 shadow-lg">
+                      <div className="flex items-center justify-between text-[10px] pb-2 border-b border-slate-800">
+                        <span className="uppercase text-violet-400 font-bold flex items-center gap-1">
+                          <FileText className="h-3.5 w-3.5" />
+                          EXTERNAL ARTIFACT
+                        </span>
+                        <span className={`px-2 py-0.5 rounded uppercase font-bold border text-[9px] ${
+                          art.status === 'human_approved'
+                            ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30'
+                            : art.status === 'superseded'
+                            ? 'bg-slate-900 text-slate-500 border-slate-800'
+                            : 'bg-amber-950 text-amber-300 border-amber-500/30'
+                        }`}>
+                          {art.status}
+                        </span>
+                      </div>
+
+                      <h4 className="text-xs font-bold text-slate-100 leading-snug">
+                        {art.title}
+                      </h4>
+
+                      <div className="space-y-1 text-[10px] text-slate-400 pt-1 border-t border-slate-850">
+                        <div className="flex justify-between">
+                          <span>Artifact ID:</span>
+                          <span className="text-slate-200">{art.id}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Source Version:</span>
+                          <span className="text-cyan-400 font-bold">v0.{art.sourceVersionNumber}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Template:</span>
+                          <span className="text-slate-200 uppercase">{art.templateType.replace('_', ' ')}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Created At:</span>
+                          <span className="text-slate-300">{new Date(art.createdAt).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Packet Hash & Provenance */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block border-b border-slate-800 pb-1">
+                        Export Packet Hash & Provenance
+                      </span>
+                      <div className="text-[10px] space-y-1">
+                        <span className="text-slate-500 block">Packet Hash:</span>
+                        <span className="text-emerald-400 font-bold bg-slate-900 p-1.5 rounded block truncate border border-slate-800">
+                          {art.exportPacketHash}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 pt-1 font-mono">
+                        Kernel: {art.kernelSummary?.insightsCount || 3} insights, {art.kernelSummary?.tensionsCount || 1} tension, {art.kernelSummary?.openQuestionsCount || 1} open question.
+                      </div>
+                    </div>
+
+                    {/* Status Management */}
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                        Lifecycle Status
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExternalArtifacts((prev) =>
+                              prev.map((a) => (a.id === art.id ? { ...a, status: 'human_approved' } : a))
+                            );
+                          }}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            art.status === 'human_approved'
+                              ? 'bg-emerald-950 border-emerald-500/50 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExternalArtifacts((prev) =>
+                              prev.map((a) => (a.id === art.id ? { ...a, status: 'superseded' } : a))
+                            );
+                          }}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            art.status === 'superseded'
+                              ? 'bg-rose-950 border-rose-500/50 text-rose-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Supersede
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Content Preview */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                        Generated Brief Content
+                      </span>
+                      <pre className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl text-[10px] text-slate-300 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-mono scrollbar-thin">
+                        {art.content}
+                      </pre>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedExternalArtifactId(null)}
+                      className="w-full py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-mono transition cursor-pointer"
+                    >
+                      ← Back to Event Inspector
+                    </button>
+                  </div>
+                );
+              })() : (() => {
                 const selectedEvt = activeSelectedEvent;
                 if (!selectedEvt) {
                   return (
@@ -2123,9 +2355,62 @@ function AppContent() {
                         <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                         {activeVersionLabel} · Exploring
                       </span>
-                      <span className="text-xs text-slate-400 font-mono">
+                      <span className="text-xs text-slate-400 font-mono hidden sm:inline">
                         3 contributors
                       </span>
+
+                      {/* EXPORT ARTIFACT ACTION DROPDOWN */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowExportDropdown(!showExportDropdown)}
+                          className="px-3 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm shadow-violet-600/20"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>Export artifact ▾</span>
+                        </button>
+
+                        {showExportDropdown && (
+                          <div className="absolute right-0 mt-1 w-56 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl p-1.5 z-30 font-mono text-xs animate-fadeIn">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowExportDropdown(false);
+                                setShowExportModal(true);
+                              }}
+                              className="w-full text-left px-3 py-2 rounded-lg bg-violet-950/80 hover:bg-violet-900/80 text-slate-100 font-bold transition flex items-center justify-between cursor-pointer border border-violet-500/30"
+                            >
+                              <span className="flex items-center gap-2">
+                                <FileText className="h-3.5 w-3.5 text-violet-400" />
+                                <span>Project brief</span>
+                              </span>
+                              <span className="text-[9px] bg-emerald-950 border border-emerald-500/30 text-emerald-400 px-1.5 py-0.2 rounded uppercase font-bold">
+                                Recommended
+                              </span>
+                            </button>
+
+                            <div className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center justify-between opacity-50 cursor-not-allowed">
+                              <span className="flex items-center gap-2">
+                                <FileText className="h-3.5 w-3.5 text-slate-500" />
+                                <span>One-page proposal</span>
+                              </span>
+                              <span className="text-[8px] bg-slate-900 border border-slate-800 text-slate-500 px-1 py-0.2 rounded font-mono">
+                                Coming soon
+                              </span>
+                            </div>
+
+                            <div className="w-full text-left px-3 py-2 rounded-lg text-slate-500 flex items-center justify-between opacity-50 cursor-not-allowed">
+                              <span className="flex items-center gap-2">
+                                <FileText className="h-3.5 w-3.5 text-slate-500" />
+                                <span>Research plan</span>
+                              </span>
+                              <span className="text-[8px] bg-slate-900 border border-slate-800 text-slate-500 px-1 py-0.2 rounded font-mono">
+                                Coming soon
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -3541,6 +3826,18 @@ function AppContent() {
           </div>
         </div>
       )}
+
+      {/* EXPORT ARTIFACT MODAL SHEET */}
+      <ExportSheetModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        selectedIdea={selectedIdea}
+        currentArtifact={currentArtifact}
+        activeVersionLabel={activeVersionLabel}
+        allIdeaVersions={allIdeaVersions}
+        events={events}
+        onSaveExternalArtifact={handleSaveExternalArtifact}
+      />
 
     </div>
   );
