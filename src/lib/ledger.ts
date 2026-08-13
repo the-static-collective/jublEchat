@@ -36,16 +36,36 @@ export function computeDeterministicHash(str: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+function canonicalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJsonValue);
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((canonical, key) => {
+        canonical[key] = canonicalizeJsonValue(record[key]);
+        return canonical;
+      }, {});
+  }
+
+  return value;
+}
+
 /**
  * Returns the payload shape used at signing time. `_signature_hash` is a legacy
  * storage slot for the resulting chain hash, so its stored value must never
- * participate in recomputing that same hash during replay.
+ * participate in recomputing that same hash during replay. Object keys are
+ * recursively sorted because PostgreSQL jsonb does not preserve insertion order;
+ * array order remains meaningful and is preserved.
  */
 export function canonicalPayloadForHash(payload: Record<string, unknown> | null): Record<string, unknown> {
-  return {
+  return canonicalizeJsonValue({
     ...(payload ?? {}),
     _signature_hash: '',
-  };
+  }) as Record<string, unknown>;
 }
 
 /**
