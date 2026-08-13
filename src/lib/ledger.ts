@@ -37,8 +37,20 @@ export function computeDeterministicHash(str: string): string {
 }
 
 /**
+ * Returns the payload shape used at signing time. `_signature_hash` is a legacy
+ * storage slot for the resulting chain hash, so its stored value must never
+ * participate in recomputing that same hash during replay.
+ */
+export function canonicalPayloadForHash(payload: Record<string, unknown> | null): Record<string, unknown> {
+  return {
+    ...(payload ?? {}),
+    _signature_hash: '',
+  };
+}
+
+/**
  * Computes the cryptographic linkage hash of a JubileeEvent given the previous block hash.
- * 
+ *
  * Note: The hash property is named `_signature_hash` in the event payload JSON as a legacy name.
  * It is not a digital signature signed by a private key; rather, it represents an unsigned
  * integrity chain hash (integrity_hash/chain_hash) that binds each event to the prior block's hash.
@@ -51,11 +63,25 @@ export function computeEventHash(evt: JubileeEvent, prevHash: string): string {
     evt.entity_type || '',
     evt.actor || '',
     evt.actor_id || '',
-    JSON.stringify(evt.payload || {}),
+    JSON.stringify(canonicalPayloadForHash(evt.payload)),
     evt.witness_strength,
     prevHash
   ].join('|');
   return computeDeterministicHash(contentToHash);
+}
+
+/**
+ * Signs an event without mutating the caller's event or payload.
+ */
+export function signEvent(evt: JubileeEvent, prevHash: string): JubileeEvent {
+  const hash = computeEventHash(evt, prevHash);
+  return {
+    ...evt,
+    payload: {
+      ...(evt.payload ?? {}),
+      _signature_hash: hash,
+    },
+  };
 }
 
 /**
