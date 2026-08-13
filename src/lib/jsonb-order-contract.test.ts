@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeEventHash } from './ledger';
+import { computeDeterministicHash, computeEventHash, reduceEvents } from './ledger';
 import type { JubileeEvent } from './types';
+
+const genesis = 'GENESIS_ANCHOR_v0.2';
 
 const base: JubileeEvent = {
   id: 'evt-order-01',
@@ -29,8 +31,31 @@ test('object key order does not change a payload hash', () => {
     payload: { nested: { second: 2, first: 1 }, alpha: 1, _signature_hash: 'existing' },
   };
 
-  assert.equal(
-    computeEventHash(left, 'GENESIS_ANCHOR_v0.2'),
-    computeEventHash(right, 'GENESIS_ANCHOR_v0.2'),
-  );
+  assert.equal(computeEventHash(left, genesis), computeEventHash(right, genesis));
+});
+
+test('replay accepts the previous insertion-order signing form', () => {
+  const unsigned: JubileeEvent = {
+    ...base,
+    id: 'evt-order-legacy',
+    payload: { zeta: 'first', alpha: 'second', _signature_hash: '' },
+  };
+  const payload = { ...(unsigned.payload ?? {}), _signature_hash: '' };
+  const signature = computeDeterministicHash([
+    unsigned.id,
+    unsigned.event_type,
+    unsigned.entity_id || '',
+    unsigned.entity_type || '',
+    unsigned.actor || '',
+    unsigned.actor_id || '',
+    JSON.stringify(payload),
+    unsigned.witness_strength,
+    genesis,
+  ].join('|'));
+  const signed: JubileeEvent = {
+    ...unsigned,
+    payload: { ...(unsigned.payload ?? {}), _signature_hash: signature },
+  };
+
+  assert.equal(reduceEvents([signed], true).audit.status, 'SECURE');
 });
