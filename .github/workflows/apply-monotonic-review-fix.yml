@@ -87,16 +87,6 @@ jobs:
                   abandon = section
 
           server_path.write_text(pre + harvest_marker + harvest + abandon_marker + abandon + chat_marker + post)
-
-          types_path = Path('src/lib/types.ts')
-          types = types_path.read_text()
-          types = replace_once(
-              types,
-              '  type: string;\n  status: ArtifactStatus;\n',
-              "  type: ArtifactType | 'note' | 'vm';\n  status: ArtifactStatus;\n",
-              'GraphNode type boundary',
-          )
-          types_path.write_text(types)
           PY
 
       - name: Set up Node
@@ -126,6 +116,6 @@ jobs:
         run: |
           git config user.name "the static collective"
           git config user.email "joyvolcanomusic@gmail.com"
-          git add server.ts src/lib/types.ts
+          git add server.ts
           git commit -m "fix: preserve ledger ordering at timestamp ties"
           git push origin HEAD:fix/ledger-witness-parity
