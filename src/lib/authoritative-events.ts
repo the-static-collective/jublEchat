@@ -1,5 +1,19 @@
 import type { AbandonedPathRef, FrictionRef } from './types';
 
+/**
+ * Returns an ISO timestamp that is strictly later than the observed ledger head.
+ * This keeps the server's append order aligned with replay's created_at ordering
+ * even when two events are admitted within the same wall-clock millisecond.
+ */
+export function nextAuthoritativeEventTimestamp(
+  previousCreatedAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): string {
+  const previousMs = previousCreatedAt ? Date.parse(previousCreatedAt) : Number.NaN;
+  const floorMs = Number.isFinite(previousMs) ? previousMs + 1 : nowMs;
+  return new Date(Math.max(nowMs, floorMs)).toISOString();
+}
+
 export interface HarvestAcceptedPayloadInput {
   ideaId: string;
   versionNumber: number;
