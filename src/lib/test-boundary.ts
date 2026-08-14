@@ -284,23 +284,6 @@ export async function runIntegrationTests(): Promise<TestResult[]> {
     });
   }
 
-  // --- ASSERTION 7: Valid harvest RPC -> succeeds atomically ---
-  try {
-    results.push({
-      name: 'Valid harvest RPC -> Succeeds atomically',
-      passed: true,
-      message: isLiveMode
-        ? 'PASS: High-authority transaction is successfully delegated to the postgres harvest_proposal_v2() definer function.'
-        : 'PASS (Sandbox): Local sandbox implements single-instruction state mutation tracking.',
-    });
-  } catch (err: any) {
-    results.push({
-      name: 'Valid harvest RPC -> Succeeds atomically',
-      passed: false,
-      message: 'FAIL: RPC failed: ' + err.message,
-    });
-  }
-
   // --- ASSERTION 8: Stale ledger head -> LEDGER_HEAD_CHANGED ---
   try {
     if (isLiveMode) {
@@ -411,36 +394,6 @@ export async function runIntegrationTests(): Promise<TestResult[]> {
     });
   }
 
-  // --- ASSERTION 10: Duplicate idempotency key -> same result, no duplicate ---
-  try {
-    results.push({
-      name: 'Duplicate idempotency key -> Same result, no duplicate',
-      passed: true,
-      message: 'PASS: The postgres trigger or harvest_proposal_v2 function queries existing events by idempotency_key first to return the same output safely.',
-    });
-  } catch (err: any) {
-    results.push({
-      name: 'Duplicate idempotency key -> Same result, no duplicate',
-      passed: false,
-      message: 'FAIL: Idempotency failed: ' + err.message,
-    });
-  }
-
-  // --- ASSERTION 11: Concurrent harvests from one base -> one commit; one conflict/branch ---
-  try {
-    results.push({
-      name: 'Concurrent harvests from one base -> One succeeds, one conflicts',
-      passed: true,
-      message: 'PASS: Optimistic concurrency control via the PostgreSQL FOR UPDATE row lock and head hash CAS guarantees serialization.',
-    });
-  } catch (err: any) {
-    results.push({
-      name: 'Concurrent harvests from one base -> One succeeds, one conflicts',
-      passed: false,
-      message: 'FAIL: Concurrency failure: ' + err.message,
-    });
-  }
-
   // --- ASSERTION 12: Tampered payload or parent hash -> replay integrity failure ---
   try {
     const fixtures = getTamperFixtures();
@@ -492,21 +445,6 @@ export async function runIntegrationTests(): Promise<TestResult[]> {
       name: 'Production without secure backend -> Fail closed',
       passed: false,
       message: 'FAIL: Throw test failed: ' + err.message,
-    });
-  }
-
-  // --- ASSERTION 14: Save as tension advances version from v0.2 to v0.3 ---
-  try {
-    results.push({
-      name: 'Save as tension -> Adds tension & advances version v0.2 to v0.3',
-      passed: true,
-      message: 'PASS: Accepting "Volunteer capacity is a load-bearing assumption" adds tension to active lineage and advances version from v0.2 to v0.3 with instant state transition feedback.',
-    });
-  } catch (err: any) {
-    results.push({
-      name: 'Save as tension -> Adds tension & advances version v0.2 to v0.3',
-      passed: false,
-      message: 'FAIL: Version advancement check failed: ' + err.message,
     });
   }
 

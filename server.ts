@@ -3,7 +3,12 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
-import { computeEventHash } from "./src/lib/ledger";
+import { computeEventHash, signEvent } from "./src/lib/ledger";
+import {
+  buildBranchDispositionPayload,
+  buildHarvestAcceptedPayload,
+  nextAuthoritativeEventTimestamp,
+} from "./src/lib/authoritative-events";
 
 // Initialize Server-bound Supabase Client
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -198,10 +203,12 @@ async function startServer() {
 
       // Fetch latest event hash to perform Compare-and-Swap (CAS) on ledger head
       let lastHash = 'GENESIS_ANCHOR_v0.2';
+      let latestEventCreatedAt: string | null = null;
       const { data: latestEvents, error: fetchErr } = await serverSupabase
         .from('events')
         .select('*')
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1);
 
       if (fetchErr) {
@@ -210,6 +217,7 @@ async function startServer() {
 
       if (latestEvents && latestEvents.length > 0) {
         const latestEvent = latestEvents[0];
+        latestEventCreatedAt = latestEvent.created_at ?? null;
         const p = typeof latestEvent.payload === 'string' 
           ? JSON.parse(latestEvent.payload) 
           : latestEvent.payload;
@@ -238,47 +246,52 @@ async function startServer() {
 
       const nextVersion = (versions?.version_number ?? 0) + 1;
 
-      // Pre-compute the secure event signature hash
-      const secureActor = {
-        source: 'authenticated_session',
-        id: user.id,
-        email: user.email
-      };
+      // Mint the exact artifact/event identity before signing. PostgreSQL must persist
+      // these values unchanged so replay verifies the bytes that were actually authorized.
+      const newArtifactId = crypto.randomUUID();
+      const eventId = crypto.randomUUID();
+      const eventCreatedAt = nextAuthoritativeEventTimestamp(latestEventCreatedAt);
 
-      const finalPayload = {
-        idea_id,
-        version: nextVersion,
-        parent_artifact_id: current_artifact_id,
-        idempotency_key: finalIdempotencyKey,
-        actor: secureActor,
-        preserved_tensions: preserved_tensions || [],
-        unresolved_questions: unresolved_questions || [],
-        abandoned_paths: abandoned_paths || [],
-        _signature_hash: ''
-      };
+      const harvestPayload = buildHarvestAcceptedPayload({
+        ideaId: idea_id,
+        versionNumber: nextVersion,
+        parentArtifactId: current_artifact_id,
+        newArtifactId,
+        idempotencyKey: finalIdempotencyKey,
+        actorId: user.id,
+        actorEmail: user.email,
+        preservedTensions: preserved_tensions || [],
+        unresolvedQuestions: unresolved_questions || [],
+        abandonedPaths: abandoned_paths || [],
+      });
 
-      const tempEvent = {
-        id: crypto.randomUUID(),
+      const unsignedHarvestEvent = {
+        id: eventId,
         event_type: 'transformation_accepted',
-        entity_id: '00000000-0000-0000-0000-000000000000', // temporary placeholder for hash calc
+        entity_id: newArtifactId,
         entity_type: 'artifact',
         actor: 'human',
         actor_id: user.email,
         capability: 'evolve-idea',
         policy: 'v0.4',
-        payload: finalPayload,
-        created_at: new Date().toISOString(),
+        payload: harvestPayload,
+        created_at: eventCreatedAt,
         rationale,
         source_proposal_id: null,
         witness_strength: 5,
       };
+      const signedHarvestEvent = signEvent(unsignedHarvestEvent as any, lastHash);
+      const computedHash = String((signedHarvestEvent.payload as any)?._signature_hash || '');
 
-      const computedHash = computeEventHash(tempEvent as any, lastHash);
-
-      // Invoke the fully atomic PostgreSQL RPC transaction
-      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('harvest_proposal_v2', {
+      // The database validates current version/head under one global ledger lock, then
+      // persists the already-signed IDs, timestamp, payload evidence, and hash exactly.
+      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('harvest_proposal_v3', {
         p_idea_id: idea_id,
         p_current_artifact_id: current_artifact_id,
+        p_new_artifact_id: newArtifactId,
+        p_event_id: eventId,
+        p_event_created_at: eventCreatedAt,
+        p_version_number: nextVersion,
         p_new_title: new_title,
         p_new_content: new_content,
         p_rationale: rationale,
@@ -287,15 +300,24 @@ async function startServer() {
         p_actor_email: user.email,
         p_idempotency_key: finalIdempotencyKey,
         p_expected_last_event_hash: lastHash,
-        p_computed_hash: computedHash
+        p_computed_hash: computedHash,
+        p_preserved_tensions: harvestPayload.preserved_tensions,
+        p_unresolved_questions: harvestPayload.unresolved_questions,
+        p_abandoned_paths: harvestPayload.abandoned_paths,
       });
 
       if (rpcErr) {
         if (rpcErr.message.includes('BASE_VERSION_NO_LONGER_CURRENT')) {
           return res.status(409).json({ error: "BASE_VERSION_NO_LONGER_CURRENT" });
         }
+        if (rpcErr.message.includes('VERSION_NUMBER_CHANGED')) {
+          return res.status(409).json({ error: "VERSION_NUMBER_CHANGED" });
+        }
         if (rpcErr.message.includes('LEDGER_HEAD_CHANGED')) {
           return res.status(409).json({ error: "LEDGER_HEAD_CHANGED" });
+        }
+        if (rpcErr.message.includes('FORBIDDEN_CULTIVATION_RIGHTS')) {
+          return res.status(403).json({ error: "Forbidden: You are not authorized to cultivate this idea." });
         }
         throw new Error(`Database transaction failed: ${rpcErr.message}`);
       }
@@ -357,10 +379,12 @@ async function startServer() {
 
       // 4. Fetch previous event hash to maintain cryptographic link chain
       let lastHash = 'GENESIS_ANCHOR_v0.2';
+      let latestEventCreatedAt: string | null = null;
       const { data: latestEvents, error: fetchErr } = await serverSupabase
         .from('events')
         .select('*')
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1);
 
       if (fetchErr) {
@@ -369,6 +393,7 @@ async function startServer() {
 
       if (latestEvents && latestEvents.length > 0) {
         const latestEvent = latestEvents[0];
+        latestEventCreatedAt = latestEvent.created_at ?? null;
         const p = typeof latestEvent.payload === 'string' 
           ? JSON.parse(latestEvent.payload) 
           : latestEvent.payload;
@@ -377,26 +402,21 @@ async function startServer() {
         }
       }
 
-      const generatedId = crypto.randomUUID();
-      const secureActor = {
-        source: 'authenticated_session',
-        id: user.id,
-        email: user.email
-      };
+      const eventId = crypto.randomUUID();
+      const eventCreatedAt = nextAuthoritativeEventTimestamp(latestEventCreatedAt);
+      const finalRationale = rationale || 'Consciously abandoned sibling path.';
+      const branchPayload = buildBranchDispositionPayload({
+        ideaId,
+        versionId,
+        versionNumber: version.version_number,
+        rationale: finalRationale,
+        witnessedAt: eventCreatedAt,
+        actorId: user.id,
+        actorEmail: user.email,
+      });
 
-      const finalPayload = {
-        idea_id: ideaId,
-        version_id: versionId,
-        version_number: version.version_number,
-        actor_kind: 'human',
-        rationale: rationale || 'Consciously abandoned sibling path.',
-        witnessed_at: new Date().toISOString(),
-        actor: secureActor,
-        _signature_hash: ''
-      };
-
-      const tempEvent = {
-        id: generatedId,
+      const unsignedBranchEvent = {
+        id: eventId,
         event_type: 'path_abandoned',
         entity_id: versionId,
         entity_type: 'artifact',
@@ -404,25 +424,26 @@ async function startServer() {
         actor_id: user.email,
         capability: 'abandon-path',
         policy: 'v0.4',
-        payload: finalPayload,
-        created_at: new Date().toISOString(),
+        payload: branchPayload,
+        created_at: eventCreatedAt,
         rationale: rationale || null,
         source_proposal_id: null,
         witness_strength: 5,
       };
+      const signedBranchEvent = signEvent(unsignedBranchEvent as any, lastHash);
+      const finalHash = String((signedBranchEvent.payload as any)?._signature_hash || '');
 
-      // Compute final hash
-      const finalHash = computeEventHash(tempEvent as any, lastHash);
-
-      // Invoke the fully atomic PostgreSQL RPC transaction for path abandonment
-      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('abandon_path_v1', {
+      // Persist the exact branch witness identity and timestamp that were signed above.
+      const { data: rpcResult, error: rpcErr } = await serverSupabase.rpc('abandon_path_v2', {
         p_idea_id: ideaId,
         p_version_id: versionId,
         p_rationale: rationale,
         p_actor_id: user.id,
         p_actor_email: user.email,
         p_expected_last_event_hash: lastHash,
-        p_computed_hash: finalHash
+        p_computed_hash: finalHash,
+        p_event_id: eventId,
+        p_event_created_at: eventCreatedAt,
       });
 
       if (rpcErr) {
@@ -438,7 +459,7 @@ async function startServer() {
         throw new Error(`Database transaction failed: ${rpcErr.message}`);
       }
 
-      res.json({ success: true, eventId: generatedId, hash: finalHash });
+      res.json({ success: true, eventId, hash: finalHash });
     } catch (error: any) {
       console.error("Server path abandonment error:", error);
       res.status(500).json({ error: error.message });
