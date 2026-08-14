@@ -7,6 +7,7 @@ import { computeEventHash, signEvent } from "./src/lib/ledger";
 import {
   buildBranchDispositionPayload,
   buildHarvestAcceptedPayload,
+  nextAuthoritativeEventTimestamp,
 } from "./src/lib/authoritative-events";
 
 // Initialize Server-bound Supabase Client
@@ -202,10 +203,12 @@ async function startServer() {
 
       // Fetch latest event hash to perform Compare-and-Swap (CAS) on ledger head
       let lastHash = 'GENESIS_ANCHOR_v0.2';
+      let latestEventCreatedAt: string | null = null;
       const { data: latestEvents, error: fetchErr } = await serverSupabase
         .from('events')
         .select('*')
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1);
 
       if (fetchErr) {
@@ -214,6 +217,7 @@ async function startServer() {
 
       if (latestEvents && latestEvents.length > 0) {
         const latestEvent = latestEvents[0];
+        latestEventCreatedAt = latestEvent.created_at ?? null;
         const p = typeof latestEvent.payload === 'string' 
           ? JSON.parse(latestEvent.payload) 
           : latestEvent.payload;
@@ -246,7 +250,7 @@ async function startServer() {
       // these values unchanged so replay verifies the bytes that were actually authorized.
       const newArtifactId = crypto.randomUUID();
       const eventId = crypto.randomUUID();
-      const eventCreatedAt = new Date().toISOString();
+      const eventCreatedAt = nextAuthoritativeEventTimestamp(latestEventCreatedAt);
 
       const harvestPayload = buildHarvestAcceptedPayload({
         ideaId: idea_id,
@@ -375,10 +379,12 @@ async function startServer() {
 
       // 4. Fetch previous event hash to maintain cryptographic link chain
       let lastHash = 'GENESIS_ANCHOR_v0.2';
+      let latestEventCreatedAt: string | null = null;
       const { data: latestEvents, error: fetchErr } = await serverSupabase
         .from('events')
         .select('*')
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1);
 
       if (fetchErr) {
@@ -387,6 +393,7 @@ async function startServer() {
 
       if (latestEvents && latestEvents.length > 0) {
         const latestEvent = latestEvents[0];
+        latestEventCreatedAt = latestEvent.created_at ?? null;
         const p = typeof latestEvent.payload === 'string' 
           ? JSON.parse(latestEvent.payload) 
           : latestEvent.payload;
@@ -396,7 +403,7 @@ async function startServer() {
       }
 
       const eventId = crypto.randomUUID();
-      const eventCreatedAt = new Date().toISOString();
+      const eventCreatedAt = nextAuthoritativeEventTimestamp(latestEventCreatedAt);
       const finalRationale = rationale || 'Consciously abandoned sibling path.';
       const branchPayload = buildBranchDispositionPayload({
         ideaId,
