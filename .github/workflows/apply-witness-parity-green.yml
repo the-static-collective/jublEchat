@@ -1,0 +1,59 @@
+name: Apply witness parity GREEN patch
+
+on:
+  push:
+    branches:
+      - fix/ledger-witness-parity
+    paths:
+      - scripts/apply-witness-parity-green.py
+      - .github/workflows/apply-witness-parity-green.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/ledger-witness-parity
+          fetch-depth: 0
+
+      - name: Apply bounded source patch
+        run: python scripts/apply-witness-parity-green.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prove focused GREEN contracts
+        run: npm run test:ledger
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Remove one-shot patch machinery
+        run: |
+          git rm scripts/apply-witness-parity-green.py
+          git rm .github/workflows/apply-witness-parity-green.yml
+
+      - name: Commit verified source repair
+        run: |
+          git config user.name "the static collective"
+          git config user.email "joyvolcanomusic@gmail.com"
+          git add server.ts src/lib/ledger.ts src/lib/test-boundary.ts
+          git commit -m "fix: preserve authoritative ledger witness parity"
+          git push origin HEAD:fix/ledger-witness-parity
