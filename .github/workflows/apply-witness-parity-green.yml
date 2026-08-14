@@ -6,6 +6,7 @@ on:
       - fix/ledger-witness-parity
     paths:
       - scripts/apply-witness-parity-green.py
+      - scripts/apply-typecheck-floor.py
       - .github/workflows/apply-witness-parity-green.yml
 
 permissions:
@@ -22,8 +23,10 @@ jobs:
           ref: fix/ledger-witness-parity
           fetch-depth: 0
 
-      - name: Apply bounded source patch
-        run: python scripts/apply-witness-parity-green.py
+      - name: Apply bounded source patches
+        run: |
+          python scripts/apply-witness-parity-green.py
+          python scripts/apply-typecheck-floor.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -48,12 +51,13 @@ jobs:
       - name: Remove one-shot patch machinery
         run: |
           git rm scripts/apply-witness-parity-green.py
+          git rm scripts/apply-typecheck-floor.py
           git rm .github/workflows/apply-witness-parity-green.yml
 
       - name: Commit verified source repair
         run: |
           git config user.name "the static collective"
           git config user.email "joyvolcanomusic@gmail.com"
-          git add server.ts src/lib/ledger.ts src/lib/test-boundary.ts
+          git add server.ts src/App.tsx src/lib/auth.tsx src/lib/hooks.ts src/lib/ledger.ts src/lib/test-boundary.ts src/lib/types.ts
           git commit -m "fix: preserve authoritative ledger witness parity"
           git push origin HEAD:fix/ledger-witness-parity
