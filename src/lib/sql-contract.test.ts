@@ -24,4 +24,10 @@ test('migration 012 defines durable witness fields and exact RPC identities', ()
   for (const fragment of requiredFragments) {
     assert.equal(sql.includes(fragment), true, `missing migration contract fragment: ${fragment}`);
   }
+
+  assert.equal(
+    (sql.match(/TO service_role;/g) ?? []).length,
+    2,
+    'both hardened SECURITY DEFINER RPCs must explicitly grant execution only to the server role after client revocations',
+  );
 });
