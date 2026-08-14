@@ -32,21 +32,23 @@ jobs:
           if 'TO service_role;' in sql:
               raise RuntimeError('service-role grants already present; refusing duplicate patch')
 
-          sql += '''
-
--- These RPCs are server-only. Client roles were revoked above; grant the
--- server-side Supabase role explicitly instead of relying on project defaults.
-GRANT EXECUTE ON FUNCTION public.harvest_proposal_v3(
-  UUID, UUID, UUID, UUID, TIMESTAMPTZ, INTEGER,
-  TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT,
-  JSONB, JSONB, JSONB
-) TO service_role;
-
-GRANT EXECUTE ON FUNCTION public.abandon_path_v2(
-  UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TIMESTAMPTZ
-) TO service_role;
-'''
-          path.write_text(sql)
+          lines = [
+              '',
+              '',
+              '-- These RPCs are server-only. Client roles were revoked above; grant the',
+              '-- server-side Supabase role explicitly instead of relying on project defaults.',
+              'GRANT EXECUTE ON FUNCTION public.harvest_proposal_v3(',
+              '  UUID, UUID, UUID, UUID, TIMESTAMPTZ, INTEGER,',
+              '  TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT,',
+              '  JSONB, JSONB, JSONB',
+              ') TO service_role;',
+              '',
+              'GRANT EXECUTE ON FUNCTION public.abandon_path_v2(',
+              '  UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TIMESTAMPTZ',
+              ') TO service_role;',
+              '',
+          ]
+          path.write_text(sql + '\n'.join(lines))
           PY
 
       - name: Set up Node
