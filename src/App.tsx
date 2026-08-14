@@ -104,7 +104,7 @@ function AppContent() {
   // Database Hooks
   const { ideas, refetch: refetchIdeas } = useIdeas();
   const { artifacts, refetch: refetchArtifacts } = useArtifacts();
-  const { events, refetch: refetchEvents } = useEvents();
+  const { events, setEvents, refetch: refetchEvents } = useEvents();
   const { edges, refetch: refetchEdges } = useEdges();
   const { versions: allIdeaVersions, refetch: refetchVersions } = useIdeaVersions();
 
@@ -296,6 +296,12 @@ function AppContent() {
         id: idea.id,
         label: idea.title,
         type,
+        status: idea.lifecycle_status === 'active' ? ('active' as const) : ('retired' as const),
+        vm_id: '',
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
       };
     });
   }, [filteredIdeas]);
@@ -2739,6 +2745,7 @@ function AppContent() {
               const enableLegacyView = selectedIdeaId === 'legacy_override';
               if (enableLegacyView) {
                 const idea = ideas.find(i => i.id === selectedIdeaId);
+                if (!idea) return null;
 
                 const ideaVersions = allIdeaVersions.filter(v => v.idea_id === idea.id);
                 const currentVersionLabel = `v0.${ideaVersions.length || 1}`;
@@ -3285,7 +3292,7 @@ function AppContent() {
                                           Divergent Sibling Nodes
                                         </p>
                                         {(() => {
-                                          const siblingIdeas = ideas.filter(i => i.id !== idea.id && i.taxonomy_level === idea.taxonomy_level && i.status === 'active');
+                                          const siblingIdeas = ideas.filter(i => i.id !== idea.id && i.taxonomy_level === idea.taxonomy_level && i.lifecycle_status === 'active');
                                           if (siblingIdeas.length > 0) {
                                             return (
                                               <div className="flex flex-col gap-1">

@@ -113,7 +113,7 @@ export function useEvents(entityId?: string) {
   }, [entityId]);
 
   useEffect(() => { fetch(); }, [fetch]);
-  return { events, loading, refetch: fetch };
+  return { events, setEvents, loading, refetch: fetch };
 }
 
 export function useProposals() {

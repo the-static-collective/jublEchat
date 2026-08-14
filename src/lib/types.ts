@@ -99,7 +99,7 @@ export interface Receipt {
 export interface GraphNode {
   id: string;
   label: string;
-  type: ArtifactType;
+  type: string;
   status: ArtifactStatus;
   vm_id: string;
   x: number;
@@ -126,6 +126,7 @@ export type EventType =
   | 'edge_created'
   | 'projection_generated'
   | 'receipt_issued'
+  | 'path_abandoned'
   | 'vm_created';
 
 export interface ExportPacket {
@@ -194,6 +195,9 @@ export interface IdeaVersion {
   artifact_id: string;
   version_number: number;
   created_at: string;
+  content?: string | null;
+  rationale?: string | null;
+  witness_strength?: number | null;
   preserved_tensions: FrictionRef[];
   unresolved_questions: FrictionRef[];
   abandoned_paths: AbandonedPathRef[];
