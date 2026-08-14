@@ -411,3 +411,16 @@ REVOKE ALL ON FUNCTION public.abandon_path_v2(
 REVOKE ALL ON FUNCTION public.abandon_path_v2(
   UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TIMESTAMPTZ
 ) FROM authenticated;
+
+
+-- These RPCs are server-only. Client roles were revoked above; grant the
+-- server-side Supabase role explicitly instead of relying on project defaults.
+GRANT EXECUTE ON FUNCTION public.harvest_proposal_v3(
+  UUID, UUID, UUID, UUID, TIMESTAMPTZ, INTEGER,
+  TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT,
+  JSONB, JSONB, JSONB
+) TO service_role;
+
+GRANT EXECUTE ON FUNCTION public.abandon_path_v2(
+  UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TIMESTAMPTZ
+) TO service_role;
