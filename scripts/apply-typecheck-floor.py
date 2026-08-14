@@ -63,7 +63,7 @@ app = replace_once(
         id: idea.id,
         label: idea.title,
         type,
-        status: idea.lifecycle_status === 'active' ? 'active' : 'retired',
+        status: idea.lifecycle_status === 'active' ? ('active' as const) : ('retired' as const),
         vm_id: '',
         x: 0,
         y: 0,
@@ -95,6 +95,18 @@ app = replace_once(
     "sibling idea lifecycle status",
 )
 app_path.write_text(app)
+
+# The verifier already handles an empty current-version pointer explicitly; its type
+# should admit the same nullable shape used by Idea.
+ledger_path = Path("src/lib/ledger.ts")
+ledger = ledger_path.read_text()
+ledger = replace_once(
+    ledger,
+    "  idea: { id: string; current_version_id: string; title: string },\n",
+    "  idea: { id: string; current_version_id: string | null; title: string },\n",
+    "strict ancestry nullable current version",
+)
+ledger_path.write_text(ledger)
 
 # Supabase is intentionally wrapped through a loose adapter; annotate auth callbacks explicitly.
 auth_path = Path("src/lib/auth.tsx")
