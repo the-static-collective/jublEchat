@@ -31,6 +31,7 @@ The system enforces a strict division of authority between client-side submissio
   7. Signs that exact event against the observed ledger head.
   8. Passes the signed identifiers, timestamp, payload evidence, expected version, and chain hash through a hardened PostgreSQL RPC that persists them unchanged under advisory locking/CAS.
 - **Signed Record Identity Parity**: PostgreSQL may validate, refuse, and atomically persist an admitted command, but it may not silently regenerate the event ID, artifact ID, event timestamp, or version number after the server has signed them. The record replayed later must be the record that was authorized.
+- **Server-Only Definer RPCs**: The hardened `harvest_proposal_v3` and `abandon_path_v2` functions revoke execution from `PUBLIC`, `anon`, and `authenticated`, then explicitly grant execution only to `service_role`. Browser/client sessions therefore cannot invoke the privileged write functions directly.
 
 ---
 
@@ -41,6 +42,7 @@ The system enforces a strict division of authority between client-side submissio
 - **Self-Hash Normalization**: `_signature_hash` is a storage slot for the resulting chain hash. Hash computation therefore always normalizes that field to the empty string before serialization; the stored hash value never participates in recomputing itself.
 - **Canonical New Writes**: New event payloads recursively sort JSON object keys before hashing while preserving array order. This prevents PostgreSQL `jsonb` key ordering from changing replay identity.
 - **Historical Replay Compatibility**: Replay first verifies the canonical form. A narrowly bounded replay-only fallback may verify the older insertion-order signing form for historical events. That compatibility path does not sign new events and does not weaken tamper detection.
+- **Monotonic Append Order**: Replay orders events by `created_at` and then `id`. Authoritative command paths read the head with the same tie-break and mint each new event timestamp strictly later than the observed head, so two writes admitted in the same wall-clock millisecond cannot reorder a valid chain during replay.
 - The default genesis anchor is `GENESIS_ANCHOR_v0.2`.
 - Any modification, insertion out of order, or tampering with historical events breaks both canonical and lawful historical verification forms, causing replay to halt with an integrity mismatch.
 
@@ -81,7 +83,8 @@ The focused ledger contract suite runs with `npm run test:ledger` and proves:
 2. Historical insertion-order signatures remain replayable without becoming the signing law for new events.
 3. Explicit Still Alive arrays survive authoritative payload construction unchanged.
 4. The server/SQL boundary uses the exact pre-signed artifact ID, event ID, event timestamp, version number, and friction arrays.
-5. Migration 012 provides durable non-null JSONB projection fields and hardened exact-identity RPC contracts.
-6. Boundary evidence does not report synthetic PASS results for checks that were not actually executed.
+5. Migration 012 provides durable non-null JSONB projection fields, hardened exact-identity RPC contracts, and explicit server-only execute grants.
+6. Authoritative event timestamps remain strictly later than the observed head and use the same ordering law as replay.
+7. Boundary evidence does not report synthetic PASS results for checks that were not actually executed.
 
 Pull-request CI additionally runs TypeScript checking, lint, and the production build. Existing lint warnings remain visible; lint errors, type errors, failed ledger contracts, or build failures block the witness-parity workflow.
