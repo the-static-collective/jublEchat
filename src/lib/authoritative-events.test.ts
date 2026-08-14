@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildBranchDispositionPayload,
   buildHarvestAcceptedPayload,
+  nextAuthoritativeEventTimestamp,
 } from './authoritative-events';
 
 test('harvest payload preserves explicit Still Alive evidence', () => {
@@ -44,4 +45,21 @@ test('branch disposition payload uses the supplied witnessed timestamp', () => {
   assert.equal(payload.witnessed_at, '2026-08-13T19:40:00.000Z');
   assert.equal(payload.version_id, 'artifact-2');
   assert.equal(payload._signature_hash, '');
+});
+
+test('authoritative event timestamp is strictly later than the observed ledger head', () => {
+  assert.equal(
+    nextAuthoritativeEventTimestamp('2026-08-13T19:40:00.123Z', Date.parse('2026-08-13T19:40:00.123Z')),
+    '2026-08-13T19:40:00.124Z',
+  );
+
+  assert.equal(
+    nextAuthoritativeEventTimestamp('2026-08-13T19:40:00.123Z', Date.parse('2026-08-13T19:40:05.000Z')),
+    '2026-08-13T19:40:05.000Z',
+  );
+
+  assert.equal(
+    nextAuthoritativeEventTimestamp(null, Date.parse('2026-08-13T19:40:05.000Z')),
+    '2026-08-13T19:40:05.000Z',
+  );
 });
