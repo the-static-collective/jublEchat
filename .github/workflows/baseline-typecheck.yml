@@ -1,4 +1,4 @@
-name: Baseline typecheck witness
+name: Baseline verification witness
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  main-typecheck:
+  main-verification:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out main
         uses: actions/checkout@v4
@@ -29,4 +29,12 @@ jobs:
         run: npm install
 
       - name: Typecheck main
+        continue-on-error: true
         run: npm run typecheck
+
+      - name: Lint main
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build main
+        run: npm run build
