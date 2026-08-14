@@ -12,6 +12,7 @@ test('server persists the exact identities and Still Alive evidence that it sign
     "import { computeEventHash, signEvent } from \"./src/lib/ledger\";",
     'buildHarvestAcceptedPayload',
     'buildBranchDispositionPayload',
+    'nextAuthoritativeEventTimestamp',
     "serverSupabase.rpc('harvest_proposal_v3'",
     'p_new_artifact_id: newArtifactId',
     'p_event_id: eventId',
@@ -26,6 +27,17 @@ test('server persists the exact identities and Still Alive evidence that it sign
   for (const fragment of requiredFragments) {
     assert.equal(source.includes(fragment), true, `missing authoritative write fragment: ${fragment}`);
   }
+
+  assert.equal(
+    (source.match(/nextAuthoritativeEventTimestamp\(latestEventCreatedAt\)/g) ?? []).length,
+    2,
+    'harvest and branch disposition must both mint a timestamp strictly after the observed head',
+  );
+  assert.equal(
+    (source.match(/\.order\('id', \{ ascending: false \}\)/g) ?? []).length >= 2,
+    true,
+    'authoritative head reads must use the same created_at/id tie-break as replay',
+  );
 
   assert.equal(
     source.includes("entity_id: '00000000-0000-0000-0000-000000000000'"),
