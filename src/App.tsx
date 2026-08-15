@@ -13,6 +13,7 @@ import { GraphCanvas } from './components/GraphCanvas';
 import { ExportSheetModal } from './components/ExportSheetModal';
 import { type TaxonomyLevel, type ChatMessage, type ProvenanceCue, type DeliberationLoop, type ExternalArtifact, type ExportPacket, type JubileeEvent } from './lib/types';
 import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents, verifyStrictAncestryPath } from './lib/ledger';
+import { deriveNearbyGrowth } from './lib/nearby-growth';
 import { runIntegrationTests, type TestResult } from './lib/test-boundary';
 
 // Simple Custom Markdown Renderer to support bold, bullet points, and code styling safely
@@ -2756,6 +2757,14 @@ function AppContent() {
                   .flatMap((m) => (m.content.proposals || []).map((p, idx) => ({ ...p, msgId: m.id, idx })))
                   .find((p) => p.type === 'evolve_idea' && p.idea_id === idea.id && !rejectedProposals[`${p.msgId}-${p.idx}`]);
 
+                const nearbyGrowth = deriveNearbyGrowth({
+                  selectedIdeaId: idea.id,
+                  ideas,
+                  versions: allIdeaVersions,
+                  artifacts,
+                  edges,
+                });
+
                 return (
                   <div className="flex-1 flex flex-col overflow-hidden h-full">
                     {/* Selected Idea Details Header */}
@@ -3286,38 +3295,43 @@ function AppContent() {
                                         )}
                                       </div>
 
-                                      {/* Sibling Ideas */}
-                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1">
+                                      {/* Evidence-backed nearby ideas */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1.5">
                                         <p className="text-[8px] font-mono text-emerald-400 uppercase font-bold tracking-wider">
-                                          Divergent Sibling Nodes
+                                          Evidenced Neighbor Nodes
                                         </p>
-                                        {(() => {
-                                          const siblingIdeas = ideas.filter(i => i.id !== idea.id && i.taxonomy_level === idea.taxonomy_level && i.lifecycle_status === 'active');
-                                          if (siblingIdeas.length > 0) {
-                                            return (
-                                              <div className="flex flex-col gap-1">
-                                                {siblingIdeas.slice(0, 2).map(sib => (
-                                                  <div key={sib.id} className="flex items-center justify-between gap-2 text-[10px]">
-                                                    <span className="font-medium text-slate-300 truncate max-w-[130px]">{sib.title}</span>
-                                                    <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1 rounded uppercase">
-                                                      {sib.taxonomy_level}
+                                        {nearbyGrowth.length > 0 ? (
+                                          <div className="flex flex-col gap-2">
+                                            {nearbyGrowth.map((neighbor) => (
+                                              <div key={neighbor.idea.id} className="space-y-1 rounded-lg border border-slate-900 bg-slate-950/30 p-2">
+                                                <div className="flex items-center justify-between gap-2 text-[10px]">
+                                                  <span className="font-medium text-slate-300 truncate max-w-[150px]">{neighbor.idea.title}</span>
+                                                  <span className="text-[8px] font-mono text-slate-500 bg-slate-950 px-1 rounded uppercase">
+                                                    {neighbor.idea.taxonomy_level}
+                                                  </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1">
+                                                  {neighbor.evidence.map((evidence) => (
+                                                    <span
+                                                      key={evidence}
+                                                      className="text-[7px] font-mono text-emerald-300 bg-emerald-950/50 border border-emerald-900/30 px-1 py-0.5 rounded uppercase"
+                                                    >
+                                                      {evidence === 'direct_relation'
+                                                        ? 'direct relation'
+                                                        : evidence === 'shared_ancestor'
+                                                          ? 'shared ancestor'
+                                                          : 'shared friction'}
                                                     </span>
-                                                  </div>
-                                                ))}
-                                                {siblingIdeas.length > 2 && (
-                                                  <p className="text-[8px] text-slate-500 font-mono italic pt-0.5">
-                                                    + {siblingIdeas.length - 2} more active parallel nodes
-                                                  </p>
-                                                )}
+                                                  ))}
+                                                </div>
                                               </div>
-                                            );
-                                          }
-                                          return (
-                                            <p className="text-[9px] text-slate-555 italic">
-                                              No parallel active {idea.taxonomy_level} nodes in this ecology.
-                                            </p>
-                                          );
-                                        })()}
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-[9px] text-slate-555 italic">
+                                            No evidenced nearby growth yet.
+                                          </p>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
