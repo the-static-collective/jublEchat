@@ -94,12 +94,9 @@ export function deriveNearbyGrowth({
   if (!selectedIdea) return [];
 
   const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  const selectedLineageOrdered = collectLineageArtifactIds(
-    selectedIdea.current_version_id,
-    artifactById,
+  const selectedLineage = new Set(
+    collectLineageArtifactIds(selectedIdea.current_version_id, artifactById),
   );
-  const selectedLineage = new Set(selectedLineageOrdered);
-  const selectedAncestors = new Set(selectedLineageOrdered.slice(1));
   const selectedFrictionIds = frictionIds(currentVersionForIdea(selectedIdea, versions));
 
   const results: NearbyGrowthResult[] = [];
@@ -107,13 +104,10 @@ export function deriveNearbyGrowth({
   for (const candidate of ideas) {
     if (candidate.id === selectedIdea.id || candidate.lifecycle_status !== 'active') continue;
 
-    const candidateLineageOrdered = collectLineageArtifactIds(
-      candidate.current_version_id,
-      artifactById,
+    const candidateLineage = new Set(
+      collectLineageArtifactIds(candidate.current_version_id, artifactById),
     );
-    const candidateLineage = new Set(candidateLineageOrdered);
-    const candidateAncestors = new Set(candidateLineageOrdered.slice(1));
-    const sharedAncestorIds = intersect(selectedAncestors, candidateAncestors);
+    const sharedAncestorIds = intersect(selectedLineage, candidateLineage);
     const sharedFrictionIds = intersect(
       selectedFrictionIds,
       frictionIds(currentVersionForIdea(candidate, versions)),
