@@ -29,6 +29,9 @@ jobs:
       - name: Ledger contracts
         run: npm run test:ledger
 
+      - name: Nearby Growth contract
+        run: npm run test:nearby-growth
+
       - name: Typecheck
         run: npm run typecheck
 
