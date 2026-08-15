@@ -123,6 +123,24 @@ test('an exact common ancestor admits a neighbor', () => {
   assert.deepEqual(result[0].sharedAncestorIds, ['shared-root']);
 });
 
+test('a selected current artifact in a candidate parent chain is shared lineage evidence', () => {
+  const ideas = [idea('selected', 'selected-current'), idea('candidate', 'candidate-current')];
+  const artifacts = [
+    artifact('selected-current'),
+    artifact('candidate-current', 'selected-current'),
+  ];
+  const versions = [
+    version('v-selected', 'selected', 'selected-current'),
+    version('v-candidate', 'candidate', 'candidate-current'),
+  ];
+
+  const result = derive(ideas, versions, artifacts);
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0].evidence, ['shared_ancestor']);
+  assert.deepEqual(result[0].sharedAncestorIds, ['selected-current']);
+});
+
 test('an exact current-version friction reference ID admits a neighbor', () => {
   const ideas = [idea('selected', 'selected-current'), idea('candidate', 'candidate-current')];
   const artifacts = [artifact('selected-current'), artifact('candidate-current')];
