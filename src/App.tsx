@@ -7,6 +7,7 @@ import {
 import { AuthProvider, useAuth } from './lib/auth';
 import {
   useIdeas, useIdeaVersions, useArtifacts, useEvents, useEdges,
+  useTransformations, useProposals,
   createIdea, evolveIdea, logEvent, synthesizeIdeas
 } from './lib/hooks';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -14,6 +15,7 @@ import { ExportSheetModal } from './components/ExportSheetModal';
 import { type TaxonomyLevel, type ChatMessage, type ProvenanceCue, type DeliberationLoop, type ExternalArtifact, type ExportPacket, type JubileeEvent } from './lib/types';
 import { resolveWhyCurrentChain, getTamperFixtures, reduceEvents, verifyStrictAncestryPath } from './lib/ledger';
 import { deriveNearbyGrowth } from './lib/nearby-growth';
+import { deriveResidualLineage } from './lib/residual-lineage';
 import { runIntegrationTests, type TestResult } from './lib/test-boundary';
 
 // Simple Custom Markdown Renderer to support bold, bullet points, and code styling safely
@@ -108,6 +110,8 @@ function AppContent() {
   const { events, setEvents, refetch: refetchEvents } = useEvents();
   const { edges, refetch: refetchEdges } = useEdges();
   const { versions: allIdeaVersions, refetch: refetchVersions } = useIdeaVersions();
+  const { transformations } = useTransformations();
+  const { proposals } = useProposals();
 
   // Local UI States
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -2765,6 +2769,16 @@ function AppContent() {
                   edges,
                 });
 
+                const residualLineage = deriveResidualLineage({
+                  selectedIdeaId: idea.id,
+                  ideas,
+                  versions: allIdeaVersions,
+                  artifacts,
+                  transformations,
+                  proposals,
+                  events,
+                });
+
                 return (
                   <div className="flex-1 flex flex-col overflow-hidden h-full">
                     {/* Selected Idea Details Header */}
@@ -3330,6 +3344,53 @@ function AppContent() {
                                         ) : (
                                           <p className="text-[9px] text-slate-555 italic">
                                             No evidenced nearby growth yet.
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      {/* Historical residue — read-only and non-authoritative */}
+                                      <div className="p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <p className="text-[8px] font-mono text-violet-400 uppercase font-bold tracking-wider">
+                                            Residual Lineage
+                                          </p>
+                                          <span className="text-[7px] font-mono text-slate-500 uppercase">
+                                            Historical · No Authority
+                                          </span>
+                                        </div>
+                                        {residualLineage.length > 0 ? (
+                                          <div className="flex flex-col gap-2">
+                                            {residualLineage.map((entry) => (
+                                              <div
+                                                key={`${entry.kind}-${entry.proposalId ?? entry.versionId ?? entry.sourceArtifactId}`}
+                                                className="space-y-1 rounded-lg border border-violet-900/20 bg-slate-950/30 p-2"
+                                              >
+                                                <div className="flex items-center justify-between gap-2">
+                                                  <span className="text-[9px] font-semibold text-slate-300">
+                                                    {entry.kind === 'rejected_proposal'
+                                                      ? 'Rejected proposal'
+                                                      : 'Path later declared abandoned'}
+                                                  </span>
+                                                  <span className="text-[7px] font-mono text-violet-400 uppercase">
+                                                    authority: none
+                                                  </span>
+                                                </div>
+                                                {entry.rationale && (
+                                                  <p className="text-[9px] text-slate-500 italic leading-normal">
+                                                    "{entry.rationale}"
+                                                  </p>
+                                                )}
+                                                {entry.witnessedAt && (
+                                                  <p className="text-[8px] text-slate-600 font-mono">
+                                                    {new Date(entry.witnessedAt).toLocaleString()}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-[9px] text-slate-555 italic">
+                                            No residual lineage recorded.
                                           </p>
                                         )}
                                       </div>
