@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test:ledger": "node --import tsx --test src/lib/ledger-contract.test.ts src/lib/authoritative-events.test.ts src/lib/jsonb-order-contract.test.ts src/lib/sql-contract.test.ts src/lib/authoritative-write-contract.test.ts",
     "test:nearby-growth": "node --import tsx --test src/lib/nearby-growth.test.ts",
+    "test:residual-lineage": "node --import tsx --test src/lib/residual-lineage.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {

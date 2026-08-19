@@ -32,6 +32,9 @@ jobs:
       - name: Nearby Growth contract
         run: npm run test:nearby-growth
 
+      - name: Residual Lineage contract
+        run: npm run test:residual-lineage
+
       - name: Typecheck
         run: npm run typecheck
 
