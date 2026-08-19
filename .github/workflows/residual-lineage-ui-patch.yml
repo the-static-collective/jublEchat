@@ -1,0 +1,193 @@
+name: Residual Lineage UI patch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'feature/residual-lineage-v0' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Apply exact App.tsx integration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.tsx')
+          text = path.read_text()
+
+          replacements = []
+
+          replacements.append((
+          """import {
+            useIdeas, useIdeaVersions, useArtifacts, useEvents, useEdges,
+            createIdea, evolveIdea, logEvent, synthesizeIdeas
+          } from './lib/hooks';""",
+          """import {
+            useIdeas, useIdeaVersions, useArtifacts, useEvents, useEdges,
+            useTransformations, useProposals,
+            createIdea, evolveIdea, logEvent, synthesizeIdeas
+          } from './lib/hooks';"""
+          ))
+
+          replacements.append((
+          """import { deriveNearbyGrowth } from './lib/nearby-growth';
+          import { runIntegrationTests, type TestResult } from './lib/test-boundary';""",
+          """import { deriveNearbyGrowth } from './lib/nearby-growth';
+          import { deriveResidualLineage } from './lib/residual-lineage';
+          import { runIntegrationTests, type TestResult } from './lib/test-boundary';"""
+          ))
+
+          replacements.append((
+          """  const { edges, refetch: refetchEdges } = useEdges();
+            const { versions: allIdeaVersions, refetch: refetchVersions } = useIdeaVersions();""",
+          """  const { edges, refetch: refetchEdges } = useEdges();
+            const { versions: allIdeaVersions, refetch: refetchVersions } = useIdeaVersions();
+            const { transformations } = useTransformations();
+            const { proposals } = useProposals();"""
+          ))
+
+          replacements.append((
+          """                const nearbyGrowth = deriveNearbyGrowth({
+                            selectedIdeaId: idea.id,
+                            ideas,
+                            versions: allIdeaVersions,
+                            artifacts,
+                            edges,
+                          });
+          """,
+          """                const nearbyGrowth = deriveNearbyGrowth({
+                            selectedIdeaId: idea.id,
+                            ideas,
+                            versions: allIdeaVersions,
+                            artifacts,
+                            edges,
+                          });
+
+                          const residualLineage = deriveResidualLineage({
+                            selectedIdeaId: idea.id,
+                            ideas,
+                            versions: allIdeaVersions,
+                            artifacts,
+                            transformations,
+                            proposals,
+                            events,
+                          });
+          """
+          ))
+
+          replacements.append((
+          """                                        ) : (
+                                                    <p className=\"text-[9px] text-slate-555 italic\">
+                                                      No evidenced nearby growth yet.
+                                                    </p>
+                                                  )}
+                                                </div>
+                                              </div>
+          """,
+          """                                        ) : (
+                                                    <p className=\"text-[9px] text-slate-555 italic\">
+                                                      No evidenced nearby growth yet.
+                                                    </p>
+                                                  )}
+                                                </div>
+
+                                                {/* Historical residue — read-only and non-authoritative */}
+                                                <div className=\"p-2.5 bg-slate-900/20 rounded-xl border border-slate-850 space-y-1.5\">
+                                                  <div className=\"flex items-center justify-between gap-2\">
+                                                    <p className=\"text-[8px] font-mono text-violet-400 uppercase font-bold tracking-wider\">
+                                                      Residual Lineage
+                                                    </p>
+                                                    <span className=\"text-[7px] font-mono text-slate-500 uppercase\">
+                                                      Historical · No Authority
+                                                    </span>
+                                                  </div>
+                                                  {residualLineage.length > 0 ? (
+                                                    <div className=\"flex flex-col gap-2\">
+                                                      {residualLineage.map((entry) => (
+                                                        <div
+                                                          key={`${entry.kind}-${entry.proposalId ?? entry.versionId ?? entry.sourceArtifactId}`}
+                                                          className=\"space-y-1 rounded-lg border border-violet-900/20 bg-slate-950/30 p-2\"
+                                                        >
+                                                          <div className=\"flex items-center justify-between gap-2\">
+                                                            <span className=\"text-[9px] font-semibold text-slate-300\">
+                                                              {entry.kind === 'rejected_proposal'
+                                                                ? 'Rejected proposal'
+                                                                : 'Path later declared abandoned'}
+                                                            </span>
+                                                            <span className=\"text-[7px] font-mono text-violet-400 uppercase\">
+                                                              authority: none
+                                                            </span>
+                                                          </div>
+                                                          {entry.rationale && (
+                                                            <p className=\"text-[9px] text-slate-500 italic leading-normal\">
+                                                              \"{entry.rationale}\"
+                                                            </p>
+                                                          )}
+                                                          {entry.witnessedAt && (
+                                                            <p className=\"text-[8px] text-slate-600 font-mono\">
+                                                              {new Date(entry.witnessedAt).toLocaleString()}
+                                                            </p>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  ) : (
+                                                    <p className=\"text-[9px] text-slate-555 italic\">
+                                                      No residual lineage recorded.
+                                                    </p>
+                                                  )}
+                                                </div>
+                                              </div>
+          """
+          ))
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one anchor, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Remove temporary patch workflow from final tree
+        run: rm .github/workflows/residual-lineage-ui-patch.yml
+
+      - name: Verify full contract before push
+        run: |
+          npm run test:ledger
+          npm run test:nearby-growth
+          npm run test:residual-lineage
+          npm run typecheck
+          npm run lint
+          npm run build
+
+      - name: Commit exact patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A src/App.tsx .github/workflows/residual-lineage-ui-patch.yml
+          git diff --cached --check
+          git commit -m "feat: show residual lineage beside nearby growth"
+          git push origin HEAD:${{ github.head_ref }}
