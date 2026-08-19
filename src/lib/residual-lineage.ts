@@ -66,6 +66,23 @@ function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function compareEventOrder(left: JubileeEvent, right: JubileeEvent): number {
+  const leftSequence = asNumber(left.ledger_sequence);
+  const rightSequence = asNumber(right.ledger_sequence);
+
+  if (
+    leftSequence !== null &&
+    rightSequence !== null &&
+    leftSequence !== rightSequence
+  ) {
+    return leftSequence - rightSequence;
+  }
+
+  const timeOrder = left.created_at.localeCompare(right.created_at);
+  if (timeOrder !== 0) return timeOrder;
+  return left.id.localeCompare(right.id);
+}
+
 function stableIdentity(entry: ResidualLineageEntry): string {
   return entry.proposalId ?? entry.versionId ?? entry.sourceArtifactId ?? entry.eventId ?? '';
 }
@@ -105,6 +122,13 @@ export function deriveResidualLineage({
 
     if (!touchesSelectedLineage) continue;
 
+    const conflictsWithConstitutedLineage =
+      selectedLineage.has(candidate.proposal_artifact_id) ||
+      (transformation.result_artifact_id !== null &&
+        selectedLineage.has(transformation.result_artifact_id));
+
+    if (conflictsWithConstitutedLineage) continue;
+
     residue.push({
       kind: 'rejected_proposal',
       ideaId: selectedIdeaId,
@@ -134,7 +158,7 @@ export function deriveResidualLineage({
 
   const abandonedByArtifactId = new Map<string, ResidualLineageEntry>();
 
-  for (const event of events) {
+  for (const event of [...events].sort(compareEventOrder)) {
     if (event.event_type !== 'path_abandoned') continue;
 
     const payload = asRecord(event.payload);
@@ -145,6 +169,10 @@ export function deriveResidualLineage({
 
     const historicalVersion = historicalVersionByArtifactId.get(artifactId);
     if (!historicalVersion) continue;
+
+    // An ancestor on the active lineage cannot simultaneously be an abandoned sibling.
+    // Contradictory exact evidence fails closed rather than inventing a winner.
+    if (selectedLineage.has(historicalVersion.artifact_id)) continue;
 
     const declaredVersionNumber = asNumber(payload.version_number);
     if (
@@ -169,7 +197,9 @@ export function deriveResidualLineage({
 
   for (const abandonedRef of currentVersion?.abandoned_paths ?? []) {
     const matches = historicalVersions.filter(
-      (candidate) => candidate.version_number === abandonedRef.version_number,
+      (candidate) =>
+        candidate.version_number === abandonedRef.version_number &&
+        !selectedLineage.has(candidate.artifact_id),
     );
 
     if (matches.length !== 1) continue;
