@@ -4,7 +4,7 @@
 
 **Goal:** Add a deterministic, read-only Residual Lineage projection for rejected proposals and explicitly abandoned historical paths without changing Nearby Growth, harvest authority, or persistence.
 
-**Architecture:** Implement one pure domain module parallel to `nearby-growth.ts`, then wire its result into the existing Garden/idea detail UI as a separate historical subsection. Existing Supabase hooks provide proposals, transformations, events, versions, and artifacts; no schema or server mutation changes are required.
+**Architecture:** Add one pure domain module parallel to `nearby-growth.ts`, then render its output as a separate historical subsection in the existing Garden. Existing read hooks already expose proposals, transformations, events, versions, and artifacts; v0 requires no schema or server mutation change.
 
 **Tech Stack:** TypeScript 5.5, Node test runner via `tsx`, React 18, existing Supabase read hooks, Vite.
 
@@ -13,13 +13,14 @@
 ## Global Constraints
 
 - Do not modify `deriveNearbyGrowth(...)` semantics or result shape.
-- Do not add a database migration, event type, canonicalizer, hash path, server mutation route, model call, or external dependency.
-- Admission must use exact proposal/transformation/path-disposition evidence only; no title/content/taxonomy similarity.
+- Do not add a migration, event type, canonicalizer, hash path, server mutation route, model call, or external dependency.
+- Admission uses exact proposal/transformation/path-disposition evidence only; never title/content/taxonomy similarity.
 - A non-current version is not abandoned unless explicit disposition evidence says so.
 - A merely unaccepted proposal is not rejected.
 - Every residual result carries `authority: 'none'`.
 - Held Proposal Seeds remain separate from rejected/abandoned residue.
 - Inputs remain immutable and output order deterministic.
+- v0 exposes **historical residue**, not an executable influence path. Human-selected residual influence is a later slice.
 
 ---
 
@@ -66,23 +67,13 @@ export function deriveResidualLineage(
 ): ResidualLineageEntry[];
 ```
 
-- [ ] **Step 1: Write the failing test fixture helpers and rejected-proposal cases**
+- [ ] **Step 1: Write the rejected-proposal RED tests**
 
-Create `src/lib/residual-lineage.test.ts` with helpers mirroring the focused style of `nearby-growth.test.ts` and these first assertions:
+Create `src/lib/residual-lineage.test.ts` with typed fixture helpers matching all required fields from `src/lib/types.ts`. Do not use `any` in the helpers.
+
+Add:
 
 ```ts
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { deriveResidualLineage } from './residual-lineage';
-import type {
-  Artifact,
-  Idea,
-  IdeaVersion,
-  JubileeEvent,
-  Proposal,
-  Transformation,
-} from './types';
-
 test('exact rejected proposal on the selected lineage remains queryable with no authority', () => {
   const result = deriveResidualLineage({
     selectedIdeaId: 'idea-a',
@@ -94,8 +85,7 @@ test('exact rejected proposal on the selected lineage remains queryable with no 
     events: [],
   });
 
-  assert.equal(result.length, 1);
-  assert.deepEqual(result[0], {
+  assert.deepEqual(result, [{
     kind: 'rejected_proposal',
     ideaId: 'idea-a',
     sourceArtifactId: 'proposal-art',
@@ -105,11 +95,11 @@ test('exact rejected proposal on the selected lineage remains queryable with no 
     rationale: 'test reason',
     witnessedAt: '2026-08-19T00:00:01.000Z',
     authority: 'none',
-  });
+  }]);
 });
 
-test('proposed or accepted transformation is not rejected residue', () => {
-  for (const status of ['proposed', 'accepted'] as const) {
+test('every non-rejected transformation status stays out of rejected residue', () => {
+  for (const status of ['proposed', 'accepted', 'branched'] as const) {
     const result = deriveResidualLineage({
       selectedIdeaId: 'idea-a',
       ideas: [idea('idea-a', 'art-current')],
@@ -124,8 +114,6 @@ test('proposed or accepted transformation is not rejected residue', () => {
 });
 ```
 
-The helper constructors must fill every required field from `src/lib/types.ts`; do not weaken domain types with `any`.
-
 - [ ] **Step 2: Run the focused test and confirm RED**
 
 Run:
@@ -136,11 +124,13 @@ node --import tsx --test src/lib/residual-lineage.test.ts
 
 Expected: FAIL because `./residual-lineage` does not exist.
 
-- [ ] **Step 3: Implement exact selected-lineage collection and rejected-proposal derivation**
+- [ ] **Step 3: Implement exact lineage collection and rejected-proposal derivation**
 
 Create `src/lib/residual-lineage.ts`.
 
-Use the same parent-artifact walk shape as Nearby Growth, but keep it local to this module for v0. A proposal qualifies only when its linked transformation is exactly `rejected` and one of the exact transformation/proposal lineage refs intersects the selected artifact lineage:
+Collect the selected artifact ancestry from `Idea.current_version_id` through `Artifact.parent_artifact_id`, stopping on missing parents or repeats.
+
+A proposal qualifies only when its exact linked transformation exists, `transformation.status === 'rejected'`, and one exact source relation touches the selected lineage:
 
 ```ts
 const proposalTouchesSelectedLineage =
@@ -150,11 +140,25 @@ const proposalTouchesSelectedLineage =
   selectedLineage.has(transformation.artifact_id);
 ```
 
-Emit the proposal artifact as `sourceArtifactId`, transformation `reason` as rationale, and `resolved_at ?? created_at` as `witnessedAt`.
+Emit:
 
-Do not classify missing acceptance as rejection.
+```ts
+{
+  kind: 'rejected_proposal',
+  ideaId: selectedIdea.id,
+  sourceArtifactId: proposal.proposal_artifact_id,
+  proposalId: proposal.id,
+  versionId: null,
+  eventId: null,
+  rationale: transformation.reason || null,
+  witnessedAt: transformation.resolved_at ?? transformation.created_at ?? null,
+  authority: 'none',
+}
+```
 
-- [ ] **Step 4: Run focused tests and confirm GREEN for rejected proposals**
+Missing acceptance is never treated as rejection.
+
+- [ ] **Step 4: Run the focused test and confirm rejected-proposal GREEN**
 
 Run:
 
@@ -162,19 +166,20 @@ Run:
 node --import tsx --test src/lib/residual-lineage.test.ts
 ```
 
-Expected: PASS for the first rejected-proposal tests.
+Expected: current rejected-proposal tests PASS.
 
-- [ ] **Step 5: Add RED tests for explicit abandoned paths**
+- [ ] **Step 5: Add path-abandonment RED tests**
 
-Add tests that prove:
+Add:
 
 ```ts
-test('path_abandoned event makes the historical version visible without changing its identity', ...)
+test('path_abandoned event exposes a historical version without rewriting it', ...)
 test('non-current version without explicit disposition is not abandoned residue', ...)
 test('current version is never returned as abandoned residue', ...)
+test('abandoned_paths projection resolves by exact version_number, not by guessing its id semantics', ...)
 ```
 
-Use a `path_abandoned` `JubileeEvent` whose payload exactly follows `buildBranchDispositionPayload(...)`:
+The event fixture must follow `buildBranchDispositionPayload(...)` exactly:
 
 ```ts
 payload: {
@@ -184,12 +189,16 @@ payload: {
   actor_kind: 'human',
   rationale: 'This branch no longer carries the chosen direction.',
   witnessed_at: '2026-08-19T00:00:02.000Z',
-  actor: { source: 'authenticated_session', id: 'human-1', email: null },
+  actor: {
+    source: 'authenticated_session',
+    id: 'human-1',
+    email: null,
+  },
   _signature_hash: 'fixture-hash',
 }
 ```
 
-Expected abandoned result:
+Expected event-backed result:
 
 ```ts
 {
@@ -207,31 +216,44 @@ Expected abandoned result:
 
 - [ ] **Step 6: Implement explicit abandoned-path derivation**
 
-Build exact maps for versions/artifacts. Admit a `path_abandoned` event only when:
+Build maps for selected-idea versions by artifact ID and by `version_number`.
+
+Admit a `path_abandoned` event only when:
 
 ```ts
 event.event_type === 'path_abandoned'
 payload.idea_id === selectedIdeaId
-payload.version_id resolves to a non-current IdeaVersion.artifact_id for selectedIdeaId
+payload.version_id resolves to an IdeaVersion.artifact_id owned by selectedIdeaId
+resolved artifact is not selectedIdea.current_version_id
 ```
 
-Also support existing explicit `currentVersion.abandoned_paths` refs when an entry can be resolved unambiguously by ID or `version_number` to a historical selected-idea version. Never infer abandonment from non-current status alone.
+For the existing `currentVersion.abandoned_paths` projection, use `AbandonedPathRef.version_number` as the mapping coordinate. Do **not** assume `AbandonedPathRef.id` is an artifact ID or IdeaVersion ID. Resolve only when the `version_number` maps unambiguously to one historical version of the selected idea.
 
-If both the event and the current-version projection name the same historical path, deduplicate by the historical version/artifact identity and prefer the exact event's `eventId`, rationale, and witnessed time.
+If an exact `path_abandoned` event and `abandoned_paths` projection name the same historical version, emit one entry and prefer the event's `eventId`, rationale, and witnessed time.
 
-- [ ] **Step 7: Add determinism, no-similarity, and immutability tests**
+- [ ] **Step 7: Add falsifier, determinism, and immutability tests**
 
-Add tests proving:
+Add:
 
 ```ts
 test('matching title content or taxonomy cannot create residue', ...)
 test('result order is deterministic across shuffled inputs', ...)
 test('derivation does not mutate source records', ...)
+test('residual derivation does not change deriveNearbyGrowth output', ...)
 ```
 
-Sort final results by fixed kind order (`rejected_proposal`, then `abandoned_path`) and stable identifying ref (`proposalId ?? versionId ?? sourceArtifactId ?? ''`).
+Final sort:
 
-- [ ] **Step 8: Add repository script and run the Task 1 gate**
+```ts
+const kindOrder: Record<ResidualLineageKind, number> = {
+  rejected_proposal: 0,
+  abandoned_path: 1,
+};
+```
+
+Sort by kind order and then `proposalId ?? versionId ?? sourceArtifactId ?? ''` using deterministic string comparison.
+
+- [ ] **Step 8: Add the focused script and run the Task 1 gate**
 
 Add to `package.json`:
 
@@ -265,12 +287,12 @@ git commit -m "feat: derive residual lineage without authority"
 - Modify: `src/App.tsx`
 
 **Interfaces:**
-- Consumes: `deriveResidualLineage(...)`, `useTransformations()`, `useProposals()`, plus the existing ideas/versions/artifacts/events.
-- Produces: one separate `Residual Lineage` UI subsection; no commands and no writes.
+- Consumes: `deriveResidualLineage(...)`, `useTransformations()`, `useProposals()`, existing ideas/versions/artifacts/events.
+- Produces: one separate historical `Residual Lineage` subsection; no commands and no writes.
 
-- [ ] **Step 1: Add the missing read hooks and pure derivation**
+- [ ] **Step 1: Load existing read surfaces and derive residue**
 
-In `src/App.tsx`, extend imports:
+Extend imports:
 
 ```ts
 import {
@@ -289,16 +311,12 @@ import {
 import { deriveResidualLineage } from './lib/residual-lineage';
 ```
 
-Inside `AppContent()` load the existing read hooks:
+Inside `AppContent()`:
 
 ```ts
 const { transformations } = useTransformations();
 const { proposals } = useProposals();
-```
 
-Then derive only from already-loaded state:
-
-```ts
 const residualLineage = useMemo(
   () => selectedIdea
     ? deriveResidualLineage({
@@ -315,31 +333,37 @@ const residualLineage = useMemo(
 );
 ```
 
-- [ ] **Step 2: Render Residual Lineage as a separate historical subsection**
+- [ ] **Step 2: Render the separate historical subsection**
 
-Locate the existing `Nearby Growth: Ecological Context` / `Evidenced Neighbor Nodes` area. Add a sibling heading **Residual Lineage** after positive neighbors and without changing `Held Proposal Seeds`.
+In the existing `Nearby Growth: Ecological Context` area, retain `Held Proposal Seeds` and `Evidenced Neighbor Nodes` unchanged, then add **Residual Lineage**.
 
-For each entry render:
+Render each entry as either:
 
 ```text
 Rejected proposal
-or
-Path later declared abandoned
-
-<explicit rationale when present>
-<date/witness metadata when present>
-Historical influence only · no authority
 ```
 
-Do not add a button, confidence meter, relevance score, or selection behavior in v0.
+or:
 
-Empty state must render exactly:
+```text
+Path later declared abandoned
+```
+
+Show only explicit rationale/date metadata when present, then the fixed footer:
+
+```text
+Historical residue · no authority
+```
+
+Do not add a button, confidence meter, relevance score, auto-selection, prompt injection, or other action in v0.
+
+Empty state:
 
 ```text
 No residual lineage recorded.
 ```
 
-- [ ] **Step 3: Verify UI integration does not change the product authority path**
+- [ ] **Step 3: Verify the UI remains read-only**
 
 Run:
 
@@ -349,7 +373,7 @@ npm run lint
 npm run build
 ```
 
-Expected: PASS. Inspect the diff and confirm no call to `createIdea`, `evolveIdea`, `logEvent`, `synthesizeIdeas`, or Supabase mutation was added as part of Residual Lineage rendering.
+Inspect the diff and confirm Residual Lineage added no new call to `createIdea`, `evolveIdea`, `logEvent`, `synthesizeIdeas`, Supabase mutation, or `/api/*` mutation route.
 
 - [ ] **Step 4: Commit Task 2**
 
@@ -367,20 +391,20 @@ git commit -m "feat: show residual lineage beside nearby growth"
 
 **Interfaces:**
 - Consumes: `npm run test:residual-lineage` from Task 1.
-- Produces: repository CI protection against future residue/authority collapse.
+- Produces: CI protection against later residue/current-state collapse.
 
-- [ ] **Step 1: Add Residual Lineage to the existing verify job**
+- [ ] **Step 1: Add the focused contract to the existing verify job**
 
-Insert after Nearby Growth:
+After the Nearby Growth step add:
 
 ```yaml
       - name: Residual Lineage contract
         run: npm run test:residual-lineage
 ```
 
-Do not change Node version, install behavior, or existing gates.
+Do not alter the existing Node version, install step, ledger gate, Nearby Growth gate, typecheck, lint, or build commands.
 
-- [ ] **Step 2: Run the full local contract before pushing**
+- [ ] **Step 2: Run the full repository contract locally**
 
 Run:
 
@@ -393,11 +417,11 @@ npm run lint
 npm run build
 ```
 
-Expected: all commands PASS. Existing repository lint warnings may remain only if they are already non-failing and unchanged.
+Expected: all PASS. Existing non-failing lint warnings may remain only if unchanged by this slice.
 
-- [ ] **Step 3: Review the exact diff against the spec falsifiers**
+- [ ] **Step 3: Review the exact diff against the design falsifiers**
 
-Confirm mechanically:
+Confirm:
 
 ```text
 no migration
@@ -405,7 +429,7 @@ no server.ts change
 no canonical hashing change
 no Nearby Growth result-shape change
 no model/network call in residual-lineage.ts
-no direct state mutation from Residual Lineage UI
+no mutation action in Residual Lineage UI
 no Full Measure / Project0 source import
 ```
 
@@ -416,11 +440,11 @@ git add .github/workflows/witness-parity.yml
 git commit -m "test: gate residual lineage contract"
 ```
 
-- [ ] **Step 5: Push and require exact-head GitHub Actions evidence**
+- [ ] **Step 5: Require exact-head GitHub Actions evidence**
 
 Push the implementation branch and wait for **Witness parity / verify** on the exact PR head.
 
-The implementation is ready for review only when Actions reports:
+Ready-for-review evidence must show:
 
 ```text
 Ledger contracts          PASS
@@ -431,4 +455,4 @@ Lint                      PASS
 Build                     PASS
 ```
 
-Do not merge on prose-only inspection if the exact-head workflow has not passed.
+Do not merge on prose-only inspection when the exact-head workflow has not passed.
