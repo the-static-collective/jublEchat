@@ -174,9 +174,28 @@ function derive(input: {
   });
 }
 
+function siblingArtifacts(): Artifact[] {
+  return [
+    artifact('art-root'),
+    artifact('art-old', 'art-root'),
+    artifact('art-current', 'art-root'),
+  ];
+}
+
+function siblingVersions(currentOverrides: Partial<IdeaVersion> = {}): IdeaVersion[] {
+  return [
+    version('iv-old', 'idea-a', 'art-old', 1),
+    version('iv-current', 'idea-a', 'art-current', 2, currentOverrides),
+  ];
+}
+
 test('exact rejected proposal on the selected lineage remains queryable with no authority', () => {
   const result = derive({
-    artifacts: [artifact('art-parent'), artifact('art-current', 'art-parent'), artifact('proposal-art')],
+    artifacts: [
+      artifact('art-parent'),
+      artifact('art-current', 'art-parent'),
+      artifact('proposal-art'),
+    ],
     transformations: [transformation('tx-rejected', 'art-parent', 'rejected')],
     proposals: [proposal('proposal-1', 'tx-rejected', 'proposal-art', 'art-parent')],
   });
@@ -207,6 +226,20 @@ test('proposed or accepted transformation is not rejected residue', () => {
   }
 });
 
+test('rejected status fails closed when the proposal artifact is already on the constituted current lineage', () => {
+  const result = derive({
+    artifacts: [
+      artifact('art-root'),
+      artifact('proposal-art', 'art-root'),
+      artifact('art-current', 'proposal-art'),
+    ],
+    transformations: [transformation('tx-rejected', 'art-root', 'rejected')],
+    proposals: [proposal('proposal-1', 'tx-rejected', 'proposal-art', 'art-root')],
+  });
+
+  assert.deepEqual(result, []);
+});
+
 test('same title content or taxonomy without exact selected-lineage evidence creates no residue', () => {
   const result = derive({
     ideas: [
@@ -229,13 +262,10 @@ test('same title content or taxonomy without exact selected-lineage evidence cre
   assert.deepEqual(result, []);
 });
 
-test('path_abandoned event makes the historical version visible without changing its identity', () => {
+test('path_abandoned event makes an explicit sibling version visible without changing its identity', () => {
   const result = derive({
-    versions: [
-      version('iv-old', 'idea-a', 'art-old', 1),
-      version('iv-current', 'idea-a', 'art-current', 2),
-    ],
-    artifacts: [artifact('art-old'), artifact('art-current', 'art-old')],
+    versions: siblingVersions(),
+    artifacts: siblingArtifacts(),
     events: [abandonedEvent('event-abandon', 'idea-a', 'art-old', 1)],
   });
 
@@ -256,11 +286,8 @@ test('path_abandoned event makes the historical version visible without changing
 
 test('non-current version without explicit disposition is not abandoned residue', () => {
   const result = derive({
-    versions: [
-      version('iv-old', 'idea-a', 'art-old', 1),
-      version('iv-current', 'idea-a', 'art-current', 2),
-    ],
-    artifacts: [artifact('art-old'), artifact('art-current', 'art-old')],
+    versions: siblingVersions(),
+    artifacts: siblingArtifacts(),
   });
 
   assert.deepEqual(result, []);
@@ -274,21 +301,31 @@ test('current version is never returned as abandoned residue', () => {
   assert.deepEqual(result, []);
 });
 
-test('abandoned_paths projection resolves by unique version_number without treating opaque id as a version id', () => {
+test('an ancestor on the current lineage is not an abandoned sibling even if a contradictory disposition event exists', () => {
   const result = derive({
     versions: [
       version('iv-old', 'idea-a', 'art-old', 1),
-      version('iv-current', 'idea-a', 'art-current', 2, {
-        abandoned_paths: [
-          {
-            id: 'disposition-ref-not-a-version-id',
-            version_number: 1,
-            reason: 'Human explicitly left this path behind.',
-          },
-        ],
-      }),
+      version('iv-current', 'idea-a', 'art-current', 2),
     ],
     artifacts: [artifact('art-old'), artifact('art-current', 'art-old')],
+    events: [abandonedEvent('event-contradiction', 'idea-a', 'art-old', 1)],
+  });
+
+  assert.deepEqual(result, []);
+});
+
+test('abandoned_paths projection resolves by unique version_number without treating opaque id as a version id', () => {
+  const result = derive({
+    versions: siblingVersions({
+      abandoned_paths: [
+        {
+          id: 'disposition-ref-not-a-version-id',
+          version_number: 1,
+          reason: 'Human explicitly left this path behind.',
+        },
+      ],
+    }),
+    artifacts: siblingArtifacts(),
   });
 
   assert.deepEqual(result, [
@@ -306,21 +343,18 @@ test('abandoned_paths projection resolves by unique version_number without treat
   ]);
 });
 
-test('exact path_abandoned event wins when the projection names the same historical path', () => {
+test('exact path_abandoned event wins when the projection names the same historical sibling', () => {
   const result = derive({
-    versions: [
-      version('iv-old', 'idea-a', 'art-old', 1),
-      version('iv-current', 'idea-a', 'art-current', 2, {
-        abandoned_paths: [
-          {
-            id: 'projection-ref',
-            version_number: 1,
-            reason: 'Projection copy',
-          },
-        ],
-      }),
-    ],
-    artifacts: [artifact('art-old'), artifact('art-current', 'art-old')],
+    versions: siblingVersions({
+      abandoned_paths: [
+        {
+          id: 'projection-ref',
+          version_number: 1,
+          reason: 'Projection copy',
+        },
+      ],
+    }),
+    artifacts: siblingArtifacts(),
     events: [abandonedEvent('event-abandon', 'idea-a', 'art-old', 1)],
   });
 
@@ -330,20 +364,51 @@ test('exact path_abandoned event wins when the projection names the same histori
   assert.equal(result[0].witnessedAt, ABANDONED_AT);
 });
 
+test('duplicate abandonment events resolve deterministically by canonical event order rather than input order', () => {
+  const earlier = abandonedEvent('event-a', 'idea-a', 'art-old', 1, {
+    created_at: '2026-08-19T00:00:03.000Z',
+    rationale: 'Earlier disposition wording.',
+    ledger_sequence: 10,
+  });
+  const later = abandonedEvent('event-b', 'idea-a', 'art-old', 1, {
+    created_at: '2026-08-19T00:00:04.000Z',
+    rationale: 'Later disposition wording.',
+    ledger_sequence: 11,
+  });
+
+  const common = {
+    selectedIdeaId: 'idea-a',
+    ideas: [idea('idea-a', 'art-current')],
+    versions: siblingVersions(),
+    artifacts: siblingArtifacts(),
+    transformations: [] as Transformation[],
+    proposals: [] as Proposal[],
+  };
+
+  const first = deriveResidualLineage({ ...common, events: [later, earlier] });
+  const second = deriveResidualLineage({ ...common, events: [earlier, later] });
+
+  assert.deepEqual(first, second);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].eventId, 'event-b');
+  assert.equal(first[0].rationale, 'Later disposition wording.');
+});
+
 test('result order is deterministic across shuffled inputs and derivation does not mutate inputs', () => {
   const ideas = [idea('idea-a', 'art-current')];
-  const versions = [
-    version('iv-old', 'idea-a', 'art-old', 1),
-    version('iv-current', 'idea-a', 'art-current', 2),
+  const versions = siblingVersions();
+  const artifacts = [
+    artifact('proposal-z'),
+    ...siblingArtifacts(),
+    artifact('proposal-a'),
   ];
-  const artifacts = [artifact('proposal-z'), artifact('art-current', 'art-old'), artifact('art-old'), artifact('proposal-a')];
   const transformations = [
     transformation('tx-z', 'art-current', 'rejected', { reason: 'z reason' }),
-    transformation('tx-a', 'art-old', 'rejected', { reason: 'a reason' }),
+    transformation('tx-a', 'art-root', 'rejected', { reason: 'a reason' }),
   ];
   const proposals = [
     proposal('proposal-z', 'tx-z', 'proposal-z', 'art-current'),
-    proposal('proposal-a', 'tx-a', 'proposal-a', 'art-old'),
+    proposal('proposal-a', 'tx-a', 'proposal-a', 'art-root'),
   ];
   const events = [abandonedEvent('event-abandon', 'idea-a', 'art-old', 1)];
   const before = JSON.stringify({ ideas, versions, artifacts, transformations, proposals, events });
